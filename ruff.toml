@@ -1,0 +1,12 @@
+line-length = 100
+target-version = "py311"
+
+[lint]
+select = ["E", "F", "W", "B", "UP", "C4"]
+ignore = [
+    "E741",  # kurze Variablennamen in numerischem Code
+    "B008",  # FastAPI-Abhängigkeiten in Standardwerten
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["E501"]

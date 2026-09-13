@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: ffmpeg installieren
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Abhängigkeiten
+        run: pip install -r requirements-dev.txt
+      - name: Linter
+        run: ruff check app spectro.py tests
+      - name: Tests (ohne Browser)
+        run: pytest --ignore=tests/test_browser.py
+
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: ffmpeg installieren
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Abhängigkeiten
+        run: |
+          pip install -r requirements-dev.txt
+          python -m playwright install --with-deps chromium
+      - name: Oberflächentests
+        run: pytest tests/test_browser.py -v
+      - name: Aufnahmen bei Fehlschlag sichern
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-artefakte
+          path: test-results/
+          if-no-files-found: ignore
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Image bauen
+        run: docker build -t spectro:ci .
+      - name: Startet und antwortet
+        run: |
+          docker run -d --name spectro -p 8080:8080 spectro:ci
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8080/healthz > /dev/null; then
+              echo "erreichbar"; exit 0
+            fi
+            sleep 2
+          done
+          docker logs spectro
+          exit 1

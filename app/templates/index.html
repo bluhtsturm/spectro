@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>spectro</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%23e2544a'/><path d='M3 11h1.4v2H3zm2.4-4h1.4v6H5.4zm2.4-3h1.4v9H7.8zm2.4 2h1.4v7h-1.4z' fill='%23fff'/></svg>">
+<script src="/static/i18n.js"></script>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="logo"></span> spectro</div>
+  <div class="modes">
+    <button id="mode-single" class="mode active" data-i18n="mode.single"></button>
+    <button id="mode-compare" class="mode" data-i18n="mode.compare"></button>
+  </div>
+  <div class="slots">
+    <span class="slot" id="slot-a">A: <b>&ndash;</b></span>
+    <span class="slot compare-only" id="slot-b">B: <b>&ndash;</b></span>
+    <button id="swap" class="compare-only ghost" data-i18n-title="slot.swap">&#8646;</button>
+    <select id="lang" class="lang" data-i18n-title="ctl.language">
+      <option value="de">Deutsch</option>
+      <option value="en">English</option>
+    </select>
+  </div>
+</header>
+
+<main>
+  <aside id="sidebar">
+    <div class="row">
+      <select id="root"></select>
+      <button id="reload" class="ghost" data-i18n-title="sidebar.reload">&#8635;</button>
+      <button id="scan" class="ghost" data-i18n="sidebar.scan" data-i18n-title="sidebar.scanTitle"></button>
+    </div>
+    <div id="crumbs" class="crumbs"></div>
+    <input id="filter" type="search" data-i18n-placeholder="sidebar.filter" autocomplete="off">
+    <div id="listing" class="listing"></div>
+    <div id="drop" class="drop">
+      <input id="file-input" type="file" multiple hidden
+             accept="audio/*,video/*,.flac,.wav,.dsf,.dff,.ape,.wv,.tta,.m4a,.opus,.mka">
+      <b data-i18n="sidebar.dropTitle"></b>
+      <span id="drop-hint"></span>
+      <div id="upstatus"></div>
+    </div>
+  </aside>
+
+  <section id="content">
+    <div id="controls">
+      <div class="ctl-group">
+        <label><span data-i18n="ctl.preset"></span>
+          <select id="preset">
+            <option value="" data-i18n="ctl.presetFree"></option>
+            <option value="lossy" data-i18n="preset.lossy"></option>
+            <option value="detail" data-i18n="preset.detail"></option>
+            <option value="vinyl" data-i18n="preset.vinyl"></option>
+            <option value="mastering" data-i18n="preset.mastering"></option>
+            <option value="overview" data-i18n="preset.overview"></option>
+          </select>
+        </label>
+        <label><span data-i18n="ctl.fft"></span>
+          <select id="nfft">
+            <option>512</option><option>1024</option><option selected>2048</option>
+            <option>4096</option><option>8192</option><option>16384</option>
+          </select>
+        </label>
+        <label><span data-i18n="ctl.overlap"></span>
+          <select id="overlap">
+            <option value="0">0 %</option><option value="0.5">50 %</option>
+            <option value="0.75" selected>75 %</option><option value="0.875">87,5 %</option>
+          </select>
+        </label>
+        <label><span data-i18n="ctl.window"></span> <select id="window"></select></label>
+        <label><span data-i18n="ctl.channels"></span>
+          <select id="channels">
+            <option value="mix" data-i18n="ch.mix"></option>
+            <option value="all" data-i18n="ch.all"></option>
+            <option value="left" data-i18n="ch.left"></option>
+            <option value="right" data-i18n="ch.right"></option>
+            <option value="mid" data-i18n="ch.mid"></option>
+            <option value="side" data-i18n="ch.side"></option>
+          </select>
+        </label>
+      </div>
+      <div class="ctl-group">
+        <label><span data-i18n="ctl.scale"></span>
+          <select id="scale">
+            <option value="linear" data-i18n="scale.linear"></option>
+            <option value="log" data-i18n="scale.log"></option>
+            <option value="mel" data-i18n="scale.mel"></option>
+          </select>
+        </label>
+        <label><span data-i18n="ctl.fmin"></span>
+          <input id="fmin" type="number" min="0" step="10" placeholder="0"></label>
+        <label><span data-i18n="ctl.fmax"></span>
+          <input id="fmax" type="number" min="0" step="100" data-i18n-placeholder="ctl.fmaxPlaceholder"></label>
+        <label><span data-i18n="ctl.dynamic"></span>
+          <select id="db_range">
+            <option value="60">60 dB</option><option value="80">80 dB</option>
+            <option value="100" selected>100 dB</option><option value="120">120 dB</option>
+          </select>
+        </label>
+        <label><span data-i18n="ctl.colour"></span> <select id="cmap"></select></label>
+        <label><span data-i18n="ctl.height"></span>
+          <input id="height" type="number" min="2" max="14" step="0.5" value="5"></label>
+      </div>
+      <div class="ctl-group compare-only">
+        <label class="chk"><input type="checkbox" id="align" checked>
+          <span data-i18n="ctl.align"></span></label>
+        <label class="chk"><input type="checkbox" id="diff" checked>
+          <span data-i18n="ctl.diff"></span></label>
+        <label><span data-i18n="ctl.diffRange"></span>
+          <input id="diff_range" type="number" min="3" max="96" step="3" value="24"></label>
+        <button id="nulltest" class="ghost" data-i18n="ctl.nulltest" data-i18n-title="ctl.nulltestTitle"></button>
+        <button id="residual" class="ghost" data-i18n="ctl.residual" data-i18n-title="ctl.residualTitle"></button>
+      </div>
+      <div class="ctl-group">
+        <button id="clicks" class="ghost" data-i18n="ctl.clicks" data-i18n-title="ctl.clicksTitle"></button>
+        <button id="wow" class="ghost" data-i18n="ctl.wow" data-i18n-title="ctl.wowTitle"></button>
+        <button id="sweep" class="ghost" data-i18n="ctl.sweep" data-i18n-title="ctl.sweepTitle"></button>
+      </div>
+      <div class="ctl-group grow-end">
+        <span id="zoominfo" class="zoominfo"></span>
+        <button id="reset-zoom" class="ghost" data-i18n="ctl.resetZoom" hidden></button>
+        <button id="render" class="primary" data-i18n="ctl.analyse"></button>
+      </div>
+    </div>
+
+    <div id="stage">
+      <div id="placeholder" class="placeholder">
+        <h2 data-i18n="stage.title"></h2>
+        <p data-i18n="stage.hint"></p>
+      </div>
+      <div id="viewer" hidden>
+        <div id="imgwrap">
+          <img id="spec" alt="Spektrogramm" draggable="false">
+          <div id="sel" class="sel" hidden></div>
+          <div id="playhead" class="playhead" hidden></div>
+          <div id="cursor" class="cursor"></div>
+        </div>
+        <div id="transport">
+          <button id="play" class="ghost" data-i18n="player.play"></button>
+          <span id="postime">0:00</span>
+          <span class="spacer"></span>
+          <a id="dl" class="ghost" download data-i18n="player.save"></a>
+          <button id="permalink" class="ghost" data-i18n="player.link"></button>
+        </div>
+      </div>
+      <div id="busy" class="busy" hidden>
+        <div class="spinner"></div><span data-i18n="stage.busy"></span>
+      </div>
+      <div id="error" class="error" hidden></div>
+      <div id="scanout" hidden></div>
+      <div id="report"></div>
+    </div>
+  </section>
+</main>
+<audio id="audio" preload="none"></audio>
+<script src="/static/app.js"></script>
+</body>
+</html>
