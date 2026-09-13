@@ -101,7 +101,7 @@ path or a forgotten `volume` entry shows up as a warning in
 | `AUTH_USER` / `AUTH_PASS` | empty | optional HTTP basic authentication |
 | `SHOW_ALL_FILES` | 0 | also list files without a known audio extension |
 | `SIDECAR` | 1 | result index for the scan (0 disables it) |
-| `SIDECAR_DIR` | /data/index | where the index lives |
+| `SIDECAR_DIR` | /data/index | where the index lives (falls back to `~/.cache/spectro/index`) |
 | `UPLOAD_DIR` | /data/uploads | where uploads are stored |
 | `CACHE_DIR` | /data/cache | rendered images and residuals |
 | `LOG_LEVEL` | INFO | log verbosity |
@@ -264,7 +264,7 @@ CLI is still the better tool:
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                 # 226 tests, about 95 seconds
+pytest                 # 233 tests, about 95 seconds
 pytest --ignore=tests/test_browser.py   # without a browser, about 60 seconds
 ruff check app spectro.py tests
 ```

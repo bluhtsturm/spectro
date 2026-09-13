@@ -553,3 +553,24 @@ exactly the failure such a file invites.
 The split changes no behaviour. That is shown twice over: every test passes
 unchanged, and a report across three files yields the same checksum before and
 after.
+
+### The result index must be writable, not merely present
+
+A CI run reported a failure that never occurred locally: after a second scan not
+a single result came from the index. The cause was not the index itself but the
+default path `/data/index`. Locally the suite ran as root and could create it;
+on the runner it could not — and the index silently switched itself off.
+
+Two things were wrong with that. First, `SidecarStore` only checked whether the
+folder could be created. An existing but read-only folder therefore counted as
+usable: the index reported itself active while discarding every entry, and every
+scan recomputed everything without anyone noticing. It now writes a file at
+startup and removes it again.
+
+Second, an unusable path disabled the index entirely. It now falls back to
+`~/.cache/spectro/index` and writes a warning to the log. Inside the container
+nothing changes; outside it, the scan works even without `SIDECAR_DIR` set.
+
+The test environment now sets the path itself, and the test additionally asserts
+that the index is active at all — otherwise the cause is once again nowhere to
+be found.

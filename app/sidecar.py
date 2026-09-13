@@ -41,6 +41,18 @@ class SidecarStore:
         self.enabled = self.base is not None
         if self.enabled:
             self.base.mkdir(parents=True, exist_ok=True)
+            # Vorhandensein genuegt nicht: ein Ordner kann bestehen und
+            # trotzdem nicht beschreibbar sein. Ohne diese Probe meldete sich
+            # die Ablage als aktiv, verwarf aber jeden Eintrag - der Scan
+            # rechnete jedes Mal neu, ohne dass es irgendwo auffiel.
+            probe = self.base / ".schreibprobe"
+            try:
+                probe.write_text("", encoding="utf-8")
+            finally:
+                try:
+                    probe.unlink()
+                except OSError:
+                    pass
 
     def path_for(self, root: str, rel: str) -> Path | None:
         if not self.enabled:

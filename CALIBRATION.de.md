@@ -567,3 +567,24 @@ Funktionen mitgelöscht – genau der Fehler, den eine solche Datei begünstigt.
 Die Zerlegung ändert kein Verhalten. Belegt ist das doppelt: alle Tests laufen
 unverändert durch, und ein Bericht über drei Dateien ergibt vor und nach der
 Zerlegung dieselbe Prüfsumme.
+
+### Die Ergebnisablage muss beschreibbar sein, nicht bloß vorhanden
+
+Ein CI-Lauf meldete einen Fehlschlag, der lokal nie auftrat: nach einem zweiten
+Scan kam kein einziges Ergebnis aus der Ablage. Ursache war nicht die Ablage
+selbst, sondern der Vorgabepfad `/data/index`. Lokal lief die Suite als root und
+konnte ihn anlegen, auf dem Läufer nicht – die Ablage schaltete sich still ab.
+
+Zwei Dinge waren daran falsch. Erstens prüfte `SidecarStore` nur, ob sich der
+Ordner anlegen lässt. Ein bestehender, aber schreibgeschützter Ordner galt
+damit als nutzbar: die Ablage meldete sich als aktiv, verwarf aber jeden
+Eintrag, und jeder Scan rechnete alles neu, ohne dass es auffiel. Jetzt wird
+beim Start eine Datei geschrieben und wieder entfernt.
+
+Zweitens schaltete sich die Ablage bei einem unbrauchbaren Pfad ganz ab. Sie
+weicht nun auf `~/.cache/spectro/index` aus und schreibt eine Warnung ins
+Protokoll. Im Container ändert sich nichts, außerhalb funktioniert der Scan
+damit auch ohne gesetztes `SIDECAR_DIR`.
+
+Die Testumgebung setzt den Pfad jetzt selbst, und der Test prüft zusätzlich,
+dass die Ablage überhaupt aktiv ist – sonst steht die Ursache wieder nirgends.

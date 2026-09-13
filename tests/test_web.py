@@ -33,6 +33,7 @@ def app_env(tmp_path_factory, request):
         "MEDIA_DIRS": f"Musik={base / 'medien'}",
         "UPLOAD_DIR": str(uploads),
         "CACHE_DIR": str(cache),
+        "SIDECAR_DIR": str(base / "index"),
         "CACHE_MAX_MB": "50",
         "MAX_UPLOAD_MB": "1",
         "AUTH_USER": "",
@@ -260,10 +261,17 @@ class TestScanStrom:
         assert ende["computed"] + ende["from_index"] == ende["count"]
 
     def test_zweiter_lauf_kommt_aus_der_ablage(self, client):
+        """Prüft zugleich, dass die Ablage überhaupt aktiv ist.
+
+        Ohne diese Zusicherung schlug der Test nur auf Läufern fehl, die den
+        Vorgabepfad nicht anlegen dürfen – und die Ursache stand nirgends.
+        """
         p = {"root": "musik", "limit": 5, "seconds": 10}
         for _ in range(2):
             with client.stream("GET", "/api/scan/stream", params=p) as r:
                 roh = "".join(r.iter_text())
+        start = next(d for a, d in self._ereignisse(roh) if a == "start")
+        assert start["index"], "Ergebnisablage ist abgeschaltet"
         ende = next(d for a, d in self._ereignisse(roh) if a == "done")
         dateien = [d["file"] for a, d in self._ereignisse(roh) if a == "file"]
         fehler = sum(1 for f in dateien if f.get("error"))
@@ -368,3 +376,33 @@ class TestUploadVerwaltung:
         client.request("DELETE", "/api/uploads")
         d = client.request("DELETE", "/api/uploads").json()
         assert d["count"] == 0 and d["deleted"] == []
+
+
+class TestAblageOrt:
+    """Die Ablage weicht aus, statt sich abzuschalten."""
+
+    def test_ausweichen_wenn_der_vorgabepfad_fehlschlaegt(self, tmp_path, monkeypatch):
+        import importlib
+
+        from app import web
+        monkeypatch.setenv("SIDECAR_DIR", "/proc/gibtsnicht/index")
+        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+        monkeypatch.setenv("MEDIA_DIRS", f"Musik={tmp_path}")
+        importlib.reload(web)
+        try:
+            assert web.SIDECARS.enabled
+            assert str(tmp_path / "cache") in web.SIDECARS.stats()["path"]
+        finally:
+            importlib.reload(web)
+
+    def test_abschaltbar(self, tmp_path, monkeypatch):
+        import importlib
+
+        from app import web
+        monkeypatch.setenv("SIDECAR", "0")
+        monkeypatch.setenv("MEDIA_DIRS", f"Musik={tmp_path}")
+        importlib.reload(web)
+        try:
+            assert web.SIDECARS.enabled is False
+        finally:
+            importlib.reload(web)

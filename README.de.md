@@ -93,7 +93,7 @@ liegen im Named Volume `spectro-data`.
 | `LANG_DEFAULT` | de | Sprache, wenn der Browser keine Vorgabe schickt |
 | `SHOW_ALL_FILES` | 0 | auch Dateien ohne bekannte Audio-Endung anzeigen |
 | `SIDECAR` | 1 | Ergebnisablage für den Scan (0 schaltet sie ab) |
-| `SIDECAR_DIR` | /data/index | Ort der Ablage |
+| `SIDECAR_DIR` | /data/index | Ort der Ablage (weicht auf `~/.cache/spectro/index` aus) |
 | `UPLOAD_DIR` | /data/uploads | Ablage der Uploads |
 | `CACHE_DIR` | /data/cache | fertige Bilder und Residuen |
 | `LOG_LEVEL` | INFO | Ausführlichkeit der Protokolle |
@@ -264,7 +264,7 @@ nichts läuft in einen Timeout. Für einen unbeaufsichtigten ersten Durchlauf
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                 # 226 Tests, rund 95 Sekunden
+pytest                 # 233 Tests, rund 95 Sekunden
 pytest --ignore=tests/test_browser.py   # ohne Browser, rund 60 Sekunden
 ruff check app spectro.py tests
 ```

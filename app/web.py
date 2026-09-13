@@ -108,12 +108,36 @@ def _load_roots() -> dict:
 ROOTS = _load_roots()
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-try:
-    SIDECARS = SidecarStore(SIDECAR_DIR if SIDECAR_ENABLED else None)
-except OSError as exc:                       # z. B. nur lesbar eingehaengt
-    log.warning("Ergebnisablage nicht nutzbar (%s) - der Scan rechnet jedes "
-                "Mal neu", exc)
-    SIDECARS = SidecarStore(None)
+def _ergebnisablage() -> SidecarStore:
+    """Waehlt den Ort der Ergebnisablage.
+
+    Die Vorgabe /data/index passt im Container. Laeuft der Dienst ohne Docker,
+    gehoert dieser Pfad meist root und ist nicht anlegbar; dann weicht die
+    Ablage auf das Benutzerverzeichnis aus, statt sich stillschweigend
+    abzuschalten - sonst rechnet jeder Scan alles neu, ohne dass jemand merkt
+    warum.
+    """
+    if not SIDECAR_ENABLED:
+        return SidecarStore(None)
+    kandidaten = [Path(SIDECAR_DIR)]
+    heim = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
+    ausweich = Path(heim) / "spectro" / "index"
+    if ausweich != kandidaten[0]:
+        kandidaten.append(ausweich)
+    for ort in kandidaten:
+        try:
+            ablage = SidecarStore(ort)
+        except OSError as exc:
+            log.warning("Ergebnisablage %s nicht nutzbar (%s)", ort, exc)
+            continue
+        if ort != kandidaten[0]:
+            log.warning("Ergebnisablage weicht auf %s aus", ort)
+        return ablage
+    log.warning("Keine Ergebnisablage nutzbar - der Scan rechnet jedes Mal neu")
+    return SidecarStore(None)
+
+
+SIDECARS = _ergebnisablage()
 
 
 def resolve(root: str, rel: str, must_be_file: bool = True) -> Path:

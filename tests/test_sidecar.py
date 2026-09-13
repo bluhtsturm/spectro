@@ -86,3 +86,35 @@ class TestAblage:
         assert daten["kind"] == "quickcheck:60"
         assert daten["analysis_version"] == core.ANALYSIS_VERSION
         assert daten["result"] == {"n": 1}
+
+
+class TestSchreibbarkeit:
+    """Ein Ordner kann bestehen und trotzdem nicht beschreibbar sein.
+
+    Vorher meldete sich die Ablage in diesem Fall als aktiv, verwarf aber
+    jeden Eintrag – der Scan rechnete jedes Mal alles neu, ohne dass es
+    irgendwo auffiel. Aufgefallen ist es erst auf einem CI-Läufer, der den
+    Vorgabepfad nicht anlegen durfte.
+    """
+
+    def test_nicht_beschreibbarer_ordner_wird_abgelehnt(self, tmp_path):
+        import os
+        gesperrt = tmp_path / "gesperrt"
+        gesperrt.mkdir()
+        gesperrt.chmod(0o555)
+        try:
+            if os.getuid() == 0:
+                pytest.skip("als root sind auch schreibgeschützte Ordner offen")
+            with pytest.raises(OSError):
+                SidecarStore(gesperrt)
+        finally:
+            gesperrt.chmod(0o755)
+
+    def test_probe_hinterlaesst_nichts(self, tmp_path):
+        ort = tmp_path / "neu"
+        SidecarStore(ort)
+        assert list(ort.iterdir()) == []
+
+    def test_neuer_ordner_wird_angelegt(self, tmp_path):
+        ablage = SidecarStore(tmp_path / "a" / "b" / "c")
+        assert ablage.enabled and (tmp_path / "a" / "b" / "c").is_dir()
