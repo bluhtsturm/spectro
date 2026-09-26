@@ -161,6 +161,61 @@ class TestResidual:
         assert [f.name for f in tmp_path.iterdir()] == ["residual.flac"]
 
 
+class TestFrequenzachse:
+    """Wie FFT-Bins auf Bildzeilen abgebildet werden."""
+
+    SR, NFFT, ZEILEN = 44100, 16384, 550
+
+    def _alt(self, db, freqs, nfft):
+        """Die fruehere Abbildung: reine lineare Interpolation."""
+        df = self.SR / nfft
+        idx = np.clip(freqs / df, 0, db.shape[0] - 1.000001)
+        i0 = idx.astype(int)
+        frac = (idx - i0)[:, None].astype(np.float32)
+        return db[i0] * (1 - frac) + db[i0 + 1] * frac
+
+    def test_schmaler_ton_verschwindet_nie(self):
+        """Bei 15 Bins je Zeile fiel ein Ton fast immer zwischen zwei
+        Stichproben durch - jetzt zählt der lauteste Bin der Zeile."""
+        bins = self.NFFT // 2 + 1
+        freqs = core.target_freqs("linear", 0, self.SR / 2, self.ZEILEN)
+        verschwunden = 0
+        for j in range(50, bins - 50, 41):
+            db = np.full((bins, 2), -100.0, dtype=np.float32)
+            db[j] = 0.0
+            verschwunden += core.remap(db, self.SR, self.NFFT, freqs).max() < -1
+        assert verschwunden == 0
+
+    @pytest.mark.parametrize("scale", ["linear", "log", "mel"])
+    def test_schmale_zeilen_bleiben_interpoliert(self, scale):
+        """Wo eine Zeile weniger als zwei Bins abdeckt, ändert sich nichts -
+        die Standardansicht (FFT 2048, linear) sieht aus wie vorher."""
+        nfft = 2048
+        bins = nfft // 2 + 1
+        db = np.random.default_rng(3).normal(-60, 10, (bins, 4)).astype(np.float32)
+        freqs = core.target_freqs(scale, 0, self.SR / 2, self.ZEILEN)
+        idx = freqs / (self.SR / nfft)
+        breite = np.diff(np.concatenate(([idx[0]], (idx[:-1] + idx[1:]) / 2, [idx[-1]])))
+        schmal = breite < 2
+        erwartet = self._alt(db, freqs, nfft)
+        neu = core.remap(db, self.SR, nfft, freqs)
+        np.testing.assert_array_equal(neu[schmal], erwartet[schmal])
+        if scale == "linear":
+            assert schmal.all()
+
+    def test_breite_zeile_zeigt_ihr_maximum(self):
+        db = np.random.default_rng(4).normal(-60, 10, (self.NFFT // 2 + 1, 3))
+        db = db.astype(np.float32)
+        freqs = core.target_freqs("linear", 0, self.SR / 2, self.ZEILEN)
+        neu = core.remap(db, self.SR, self.NFFT, freqs)
+        df = self.SR / self.NFFT
+        k = 300                                   # eine Zeile mitten im Bild
+        idx = freqs / df
+        lo = int(np.ceil((idx[k - 1] + idx[k]) / 2))
+        hi = int(np.ceil((idx[k] + idx[k + 1]) / 2))
+        np.testing.assert_array_equal(neu[k], db[lo:hi].max(axis=0))
+
+
 class TestRobustheit:
     def test_defekte_datei_endet_als_audioerror(self, broken):
         with pytest.raises(core.AudioError):

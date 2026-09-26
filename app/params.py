@@ -6,12 +6,13 @@ zusammen und bleibt die Schnittstelle nach außen.
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import asdict, dataclass
 
 import numpy as np
 
-from .i18n import normalise, set_current as _set_lang
+from .i18n import normalise, set_current as _set_lang, t
 
 
 ANALYSIS_VERSION = 12
@@ -104,22 +105,30 @@ class Params:
     diff_range: float = 24.0       # +/- dB im Differenzbild
 
     def validate(self) -> Params:
+        sprache = self.lang
+        # NaN und Unendlich kaemen sonst bis ins Zeichnen durch und endeten
+        # dort als unverstaendlicher Fehler
+        for name in ("overlap", "fmin", "fmax", "db_range", "db_top", "width",
+                     "height", "start", "duration", "diff_range"):
+            wert = getattr(self, name)
+            if wert is not None and not math.isfinite(float(wert)):
+                raise ValueError(t("param.not_finite", sprache, name=name))
         if self.nfft < 32 or self.nfft & (self.nfft - 1):
-            raise ValueError("nfft muss eine Zweierpotenz >= 32 sein")
+            raise ValueError(t("param.nfft", sprache))
         if not 0.0 <= self.overlap <= 0.95:
-            raise ValueError("overlap muss zwischen 0 und 0.95 liegen")
+            raise ValueError(t("param.overlap", sprache))
         if self.window not in WINDOWS:
-            raise ValueError(f"unbekanntes Fenster: {self.window}")
+            raise ValueError(t("param.window", sprache, value=self.window))
         if self.scale not in ("linear", "log", "mel"):
-            raise ValueError(f"unbekannte Skala: {self.scale}")
+            raise ValueError(t("param.scale", sprache, value=self.scale))
         if self.channels not in ("mix", "left", "right", "mid", "side", "all"):
-            raise ValueError(f"unbekannter Kanalmodus: {self.channels}")
+            raise ValueError(t("param.channels", sprache, value=self.channels))
         if not re.fullmatch(r"[A-Za-z0-9_]+", self.cmap):
-            raise ValueError("ungueltige Colormap")
+            raise ValueError(t("param.cmap_invalid", sprache))
         if self.cmap not in CMAPS and self.cmap not in plt_colormaps():
-            raise ValueError(f"unbekannte Colormap: {self.cmap}")
+            raise ValueError(t("param.cmap", sprache, value=self.cmap))
         if self.theme not in THEMES:
-            raise ValueError(f"unbekanntes Theme: {self.theme}")
+            raise ValueError(t("param.theme", sprache, value=self.theme))
         self.lang = normalise(self.lang)
         self.max_cols = int(np.clip(self.max_cols, 100, 20000))
         self.dpi = int(np.clip(self.dpi, 40, 300))
@@ -139,7 +148,7 @@ class Params:
             if self.fmax < self.fmin:
                 self.fmin, self.fmax = self.fmax, self.fmin
             if self.fmax - self.fmin < 1.0:
-                raise ValueError("fmin und fmax liegen zu dicht beieinander")
+                raise ValueError(t("param.freq_close", sprache))
 
         if self.start is not None:
             self.start = max(0.0, float(self.start))
@@ -150,7 +159,7 @@ class Params:
         if self.sr is not None:
             self.sr = int(self.sr)
             if not 1000 <= self.sr <= 768000:
-                raise ValueError("sr muss zwischen 1000 und 768000 Hz liegen")
+                raise ValueError(t("param.sr", sprache))
         return self
 
     def as_dict(self) -> dict:

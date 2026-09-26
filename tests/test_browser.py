@@ -284,3 +284,52 @@ class TestUploadsLoeschen:
             assert not s.fehler, s.fehler
         finally:
             s.schliessen()
+
+
+class TestHoeren:
+    def test_ab_umschalten_im_vergleich(self, seite):
+        """Die Umschaltung wählt die andere Datei und springt an dieselbe
+        Stelle - verschoben um den Versatz zwischen beiden."""
+        seite.page.click("#mode-compare")
+        seite.page.wait_for_timeout(300)
+        seite.datei_waehlen("fullband", "A")
+        seite.page.wait_for_timeout(1500)
+        seite.datei_waehlen("lossy", "B")
+        seite.warte_auf_bild()
+        seite.page.wait_for_selector("#report .card", timeout=90000)
+        assert seite.page.locator("#abswitch").inner_text() == "Hören: A"
+        seite.page.evaluate("() => { state.versatz = 0.5; }")
+        seite.page.click("#abswitch")
+        assert seite.page.locator("#abswitch").inner_text() == "Hören: B"
+        quelle = seite.page.evaluate("() => segmentQuelle(1.0)")
+        assert "lossy" in quelle
+        start = float(quelle.split("start=")[1].split("&")[0])
+        t0 = seite.page.evaluate("() => state.boxes[0].t0")
+        assert abs(start - max(0.0, t0 + 1.0 - 0.5)) < 1e-3
+        seite.page.keyboard.press("x")
+        assert seite.page.locator("#abswitch").inner_text() == "Hören: A"
+
+
+class TestSpracheVomServer:
+    def test_voreinstellung_ohne_parameter(self, browser, dienst):
+        """Ohne ?lang= entscheidet Accept-Language - wie für die Bewertungen."""
+        kontext = browser.new_context(locale="en-US", extra_http_headers={
+            "Accept-Language": "en-US,en;q=0.9"})
+        seite = kontext.new_page()
+        try:
+            seite.goto(dienst + "/", wait_until="networkidle")
+            assert seite.evaluate("() => window.LANG") == "en"
+            assert seite.locator("html").get_attribute("lang") == "en"
+        finally:
+            kontext.close()
+
+
+class TestUploadFortschritt:
+    def test_datei_ueber_die_oberflaeche(self, seite, fullband):
+        seite.page.set_input_files("#file-input", str(fullband))
+        seite.page.wait_for_function(
+            "() => /1/.test(document.getElementById('upstatus').textContent)"
+            " && !/%/.test(document.getElementById('upstatus').textContent)",
+            timeout=60000)
+        assert seite.page.evaluate("() => state.root") == "uploads"
+        seite.warte_auf_bild()

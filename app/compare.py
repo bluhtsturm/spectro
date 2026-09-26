@@ -177,7 +177,7 @@ def compare(path_a: str, path_b: str, p: Params, align: bool = True,
         elif shift < 0:
             db_ = db_[:, -shift:]
 
-    chan = a.labels[0] if a.labels else "Summe"
+    chan = a.labels[0] if a.labels else t("ch.mono_sum", p.lang)
     panels = [
         Panel(da, f"A: {ia['name']} · {chan}", sr, a.t0, a.t0 + a.duration),
         Panel(db_, f"B: {ib['name']} · {chan}", sr, b.t0, b.t0 + b.duration),
@@ -398,7 +398,8 @@ def null_residual(path_a: str, path_b: str, out_path: str,
             err = _decoder_error(proc)
         n = len(raw) // (4 * ch)
         if not n:
-            raise AudioError(f"keine Samples aus {os.path.basename(path)}: {err[:200]}")
+            raise AudioError(t("err.no_samples_from", p.lang,
+                               name=os.path.basename(path), err=err[:200]))
         # ohne Kopie: das Array teilt sich den Speicher mit den gelesenen Bytes
         return np.frombuffer(raw, dtype=np.float32, count=n * ch).reshape(-1, ch)
 

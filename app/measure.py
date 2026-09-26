@@ -142,7 +142,7 @@ def _welch(x: np.ndarray, fs: float, nperseg: int = 4096):
     """Gemitteltes Leistungsdichtespektrum (entspricht scipy.signal.welch)."""
     nperseg = min(nperseg, (x.size // 2) * 2)
     if nperseg < 16:
-        raise AudioError("zu wenig Material fuer die Modulationsanalyse")
+        raise AudioError(t("err.too_short_mod"))
     w = np.hanning(nperseg)
     hop = nperseg // 2
     n = 1 + (x.size - nperseg) // hop
@@ -287,15 +287,15 @@ def _tone_steps(x: np.ndarray, sr: int, block: float = 0.25,
                 stufen.append(akt)
             akt = None
             continue
-        t, hz, pegel = eintrag
+        zeit, hz, pegel = eintrag
         if akt and abs(hz - akt["hz"][-1]) / max(akt["hz"][-1], 1.0) < 0.03:
             akt["hz"].append(hz)
             akt["pegel"].append(pegel)
-            akt["ende"] = t + block
+            akt["ende"] = zeit + block
         else:
             if akt and akt["ende"] - akt["start"] >= min_dauer:
                 stufen.append(akt)
-            akt = {"start": t, "ende": t + block, "hz": [hz], "pegel": [pegel]}
+            akt = {"start": zeit, "ende": zeit + block, "hz": [hz], "pegel": [pegel]}
 
     fertig = []
     for s in stufen:

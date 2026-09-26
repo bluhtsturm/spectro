@@ -144,6 +144,59 @@ class TestSteilheit:
         b, _ = band_of(lossy)
         assert b["signal_bandwidth_hz"] <= b["edge_hz"] + 1000
 
+    @staticmethod
+    def _suche_stelle_fuer_stelle(med_db, sr, nfft, min_hz=7000.0):
+        """Die urspruengliche Suche als Schleife - Massstab fuer die
+        vektorisierte Fassung, die exakt dasselbe liefern muss."""
+        df = sr / nfft
+        sm = core._smooth(med_db, max(1, int(150 / df)))
+        nyq = sr / 2
+        best = None
+        for i in range(max(int(min_hz / df), 4), int(0.995 * nyq / df)):
+            f = i * df
+            b0, b1 = max(4, int((f - 1500) / df)), i
+            a0, a1 = int((f + 300) / df), int(min(f + 4000, nyq) / df)
+            if b1 - b0 < 3 or a1 - a0 < 3:
+                continue
+            drop = float(np.median(sm[b0:b1]) - np.median(sm[a0:a1]))
+            if best is None or drop > best[0]:
+                best = (drop, f, float(np.median(sm[a0:a1])))
+        return best
+
+    @pytest.mark.parametrize("sr,nfft", [(44100, 1024), (44100, 4096), (48000, 8192),
+                                         (96000, 4096), (192000, 16384)])
+    def test_suche_entspricht_der_schleife(self, sr, nfft, monkeypatch):
+        """Die Kante ist kalibriert - schneller rechnen darf sie nicht verschieben.
+
+        Geprüft wird die Fundstelle vor der Feinjustierung: dazu wird die
+        Mindestdifferenz so gesetzt, dass jede Fundstelle durchkommt, und die
+        erste Stufe über ein Spionfenster abgegriffen.
+        """
+        from app import band
+        rng = np.random.default_rng(sr + nfft)
+        f = np.arange(nfft // 2 + 1) * sr / nfft
+        gefunden = []
+        original = band._window_medians
+
+        def mitschreiben(x, starts, ends):
+            werte = original(x, starts, ends)
+            gefunden.append(werte)
+            return werte
+
+        monkeypatch.setattr(band, "_window_medians", mitschreiben)
+        for versuch in range(20):
+            kante = rng.uniform(8000, sr / 2)
+            med = (rng.normal(-40, rng.uniform(0.1, 8), f.size)
+                   - np.where(f > kante, rng.uniform(0, 90), 0))
+            if versuch % 4 == 0:
+                med = np.round(med)                  # viele gleiche Werte
+            gefunden.clear()
+            band.spectral_edge(med, sr, nfft, min_drop=-1e9, min_steepness=-1e9)
+            erwartet = self._suche_stelle_fuer_stelle(med, sr, nfft)
+            unten, oben = gefunden
+            k = int(np.argmax(unten - oben))
+            assert (float((unten - oben)[k]), float(oben[k])) == (erwartet[0], erwartet[2])
+
 
 class TestParameter:
     @pytest.mark.parametrize("kw,erwartet", [
@@ -160,6 +213,18 @@ class TestParameter:
     def test_unsinnige_werte_werden_abgelehnt(self, kw, erwartet):
         with pytest.raises(ValueError, match=erwartet):
             core.Params(**kw).validate()
+
+    def test_meldungen_folgen_der_sprache(self):
+        with pytest.raises(ValueError, match="power of two"):
+            core.Params(nfft=3, lang="en").validate()
+        with pytest.raises(ValueError, match="unknown window"):
+            core.Params(window="x", lang="en").validate()
+
+    @pytest.mark.parametrize("feld", ["fmax", "width", "db_range", "start", "overlap"])
+    def test_nicht_endliche_werte_werden_abgelehnt(self, feld):
+        for wert in (float("nan"), float("inf")):
+            with pytest.raises(ValueError, match=feld):
+                core.Params(**{feld: wert}).validate()
 
     def test_vertauschte_grenzen_werden_getauscht(self):
         p = core.Params(fmin=18000, fmax=200).validate()

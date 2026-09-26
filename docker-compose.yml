@@ -13,6 +13,8 @@ services:
       MAX_UPLOAD_MB: "${MAX_UPLOAD_MB:-1024}"
       CACHE_MAX_MB: "${CACHE_MAX_MB:-2048}"
       MAX_RENDERS: "${MAX_RENDERS:-2}"
+      SCAN_JOBS: "${SCAN_JOBS:-2}"
+      MAX_STREAMS: "${MAX_STREAMS:-4}"
       SHOW_ALL_FILES: "${SHOW_ALL_FILES:-0}"
       SIDECAR: "${SIDECAR:-1}"
       LANG_DEFAULT: "${LANG_DEFAULT:-de}"

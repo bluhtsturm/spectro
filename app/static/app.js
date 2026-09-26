@@ -13,6 +13,10 @@ const state = {
   zoom: null,       // {start, duration, fmin, fmax}
   view: null,       // Zeitfenster des aktuellen Bildes
   objectUrl: null,
+  hoeren: "a",      // welche Fassung beim Abspielen läuft (Vergleich)
+  versatz: 0,       // A-Zeit = B-Zeit + versatz [s]
+  versatzGenau: false,
+  abspielBeginn: 0, // Sekunden ab Bildanfang, an denen die aktuelle Quelle beginnt
 };
 
 /* ------------------------------------------------------------- Sprache */
@@ -58,13 +62,15 @@ const esc = (v) => String(v ?? "").replace(/[&<>"']/g,
   (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmtHz = (f) => f == null ? "–" : f >= 1000 ? (f / 1000).toFixed(1) + " kHz" : f.toFixed(0) + " Hz";
 
+async function fehlerText(r) {
+  let msg = r.statusText || String(r.status);
+  try { msg = (await r.json()).detail || msg; } catch (e) {}
+  return msg;
+}
+
 async function jget(url) {
   const r = await fetch(url);
-  if (!r.ok) {
-    let msg = r.statusText;
-    try { msg = (await r.json()).detail || msg; } catch (e) {}
-    throw new Error(msg);
-  }
+  if (!r.ok) throw new Error(await fehlerText(r));
   return r.json();
 }
 
@@ -197,7 +203,6 @@ function row(entry, kind) {
   const el = document.createElement("div");
   el.className = "item " + kind;
   el.dataset.path = entry.path;
-  el.dataset.path = entry.path;
   el.dataset.kind = kind;
   const nm = document.createElement("div");
   nm.className = "nm";
@@ -244,8 +249,15 @@ function row(entry, kind) {
       del.onclick = async (ev) => {
         ev.stopPropagation();
         if (!confirm(T("sidebar.confirmDelete", { name: entry.name }))) return;
-        await fetch(`/api/upload?path=${encodeURIComponent(entry.path)}&lang=${window.LANG}`,
-                    { method: "DELETE" });
+        try {
+          const r = await fetch(
+            `/api/upload?path=${encodeURIComponent(entry.path)}&lang=${window.LANG}`,
+            { method: "DELETE" });
+          if (!r.ok) throw new Error(await fehlerText(r));
+          $("upstatus").textContent = "";
+        } catch (e) {
+          $("upstatus").textContent = T("msg.deleteFailed", { msg: e.message });
+        }
         auswahl.delete(entry.path);
         browse(state.path);
       };
@@ -303,16 +315,22 @@ async function loescheUploads(pfade) {
     : T("uploads.confirmAll");
   if (!confirm(frage)) return;
   try {
+    let r;
     if (pfade) {
       const q = new URLSearchParams();
       pfade.forEach((p) => q.append("path", p));
       q.set("lang", window.LANG);
-      await fetch("/api/upload?" + q, { method: "DELETE" });
+      r = await fetch("/api/upload?" + q, { method: "DELETE" });
     } else {
-      await fetch("/api/uploads?lang=" + window.LANG, { method: "DELETE" });
+      r = await fetch("/api/uploads?lang=" + window.LANG, { method: "DELETE" });
     }
+    if (!r.ok) throw new Error(await fehlerText(r));
+    // Teilerfolg: was nicht gelöscht werden konnte, steht in der Antwort
+    const fehler = ((await r.json()).errors || []).map((e) => `${e.path}: ${e.error}`);
+    $("upstatus").textContent = fehler.length
+      ? T("msg.deleteFailed", { msg: fehler.join(", ") }) : "";
   } catch (e) {
-    $("upstatus").textContent = T("msg.uploadFailed", { msg: e.message });
+    $("upstatus").textContent = T("msg.deleteFailed", { msg: e.message });
   }
   auswahl.clear();
   browse(state.path);
@@ -329,6 +347,8 @@ function filterList() {
 function select(slot, entry) {
   state[slot] = { root: state.root, path: entry.path, name: entry.name };
   state.zoom = null;
+  state.versatz = 0;
+  state.versatzGenau = false;
   markSelection();
   render();
 }
@@ -345,30 +365,56 @@ function markSelection() {
 }
 
 /* ---------------------------------------------------------------- Upload */
+// Eine Datei je Anfrage: so gibt es einen Fortschritt je Datei, und eine zu
+// große Datei bricht nicht die übrigen mit ab. fetch() kennt keinen
+// Upload-Fortschritt, deshalb XMLHttpRequest.
+function uploadEine(datei, fortschritt) {
+  return new Promise((ok, fehler) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/upload?lang=" + window.LANG);
+    xhr.upload.onprogress = (ev) => {
+      if (ev.lengthComputable) fortschritt(ev.loaded / ev.total);
+    };
+    xhr.onload = () => {
+      let res = null;
+      try { res = JSON.parse(xhr.responseText); } catch (e) {}
+      if (xhr.status >= 200 && xhr.status < 300 && res) ok(res);
+      else fehler(new Error((res && res.detail) || xhr.statusText || String(xhr.status)));
+    };
+    xhr.onerror = () => fehler(new Error(T("msg.network")));
+    const fd = new FormData();
+    fd.append("files", datei);
+    xhr.send(fd);
+  });
+}
+
 async function upload(fileList) {
   const files = [...fileList];
   if (!files.length) return;
-  const fd = new FormData();
-  files.forEach((f) => fd.append("files", f));
-  $("upstatus").textContent = T("msg.uploading", { n: files.length });
-  try {
-    const r = await fetch("/api/upload?lang=" + window.LANG,
-                          { method: "POST", body: fd });
-    const res = await r.json();
-    const msgs = [];
-    if (res.saved && res.saved.length) msgs.push(T("msg.uploaded", { n: res.saved.length }));
-    (res.errors || []).forEach((e) => msgs.push(`${e.name}: ${e.error}`));
-    $("upstatus").textContent = msgs.join(" · ");
-    if (res.saved && res.saved.length) {
-      state.root = "uploads";
-      $("root").value = "uploads";
-      await browse("");
-      const last = res.saved[res.saved.length - 1];
-      select(state.compare && state.a && !state.b ? "b" : "a",
-             { name: last.name, path: last.path });
+  const gespeichert = [], msgs = [];
+  for (const [i, datei] of files.entries()) {
+    const zeigen = (anteil) => {
+      $("upstatus").textContent = T("msg.uploadProgress", {
+        i: i + 1, n: files.length, name: datei.name, pct: Math.round(anteil * 100) });
+    };
+    zeigen(0);
+    try {
+      const res = await uploadEine(datei, zeigen);
+      gespeichert.push(...(res.saved || []));
+      (res.errors || []).forEach((e) => msgs.push(`${e.name}: ${e.error}`));
+    } catch (e) {
+      msgs.push(`${datei.name}: ${T("msg.uploadFailed", { msg: e.message })}`);
     }
-  } catch (e) {
-    $("upstatus").textContent = T("msg.uploadFailed", { msg: e.message });
+  }
+  if (gespeichert.length) msgs.unshift(T("msg.uploaded", { n: gespeichert.length }));
+  $("upstatus").textContent = msgs.join(" · ");
+  if (gespeichert.length) {
+    state.root = "uploads";
+    $("root").value = "uploads";
+    await browse("");
+    const last = gespeichert[gespeichert.length - 1];
+    select(state.compare && state.a && !state.b ? "b" : "a",
+           { name: last.name, path: last.path });
   }
 }
 
@@ -541,15 +587,27 @@ function stopAudio() {
   $("play").textContent = T("player.play");
 }
 
-function playSegment() {
-  if (!state.a || !state.boxes.length) return;
-  if (!audio.paused) { audio.pause(); $("play").textContent = T("player.resume"); return; }
-  if (!audio.src) {
-    const b = state.boxes[0];
-    const q = new URLSearchParams({ root: state.a.root, path: state.a.path,
-      start: (b.t0 || 0).toFixed(3), duration: Math.max(b.t1 - b.t0, 0.2).toFixed(3) });
-    audio.src = "/api/audio?" + q;
-  }
+const hoertB = () => state.compare && !!state.b && state.hoeren === "b";
+
+function abLabel() {
+  $("abswitch").textContent = T("player.listen", { slot: hoertB() ? "B" : "A" });
+}
+
+// Quelle ab einer Stelle im sichtbaren Ausschnitt. B ist gegen A um den
+// Versatz verschoben (A-Zeit = B-Zeit + Versatz); beim Umschalten geht es
+// deshalb an derselben musikalischen Stelle weiter, nicht an derselben
+// Sekunde der Datei.
+function segmentQuelle(abBildanfang) {
+  const b = state.boxes[0];
+  const datei = hoertB() ? state.b : state.a;
+  const verschiebung = hoertB() ? -state.versatz : 0;
+  const q = new URLSearchParams({ root: datei.root, path: datei.path,
+    start: Math.max(0, (b.t0 || 0) + abBildanfang + verschiebung).toFixed(3),
+    duration: Math.max(b.t1 - b.t0 - abBildanfang, 0.2).toFixed(3) });
+  return "/api/audio?" + q;
+}
+
+function abspielen() {
   audio.play().then(() => { $("play").textContent = T("player.pause"); })
     .catch((e) => {
       $("error").hidden = false;
@@ -557,11 +615,36 @@ function playSegment() {
     });
 }
 
+function playSegment() {
+  if (!state.a || !state.boxes.length) return;
+  if (!audio.paused) { audio.pause(); $("play").textContent = T("player.resume"); return; }
+  if (!audio.src) {
+    state.abspielBeginn = 0;
+    audio.src = segmentQuelle(0);
+  }
+  abspielen();
+}
+
+function switchAB() {
+  if (!state.compare || !state.b) return;
+  const lief = !audio.paused;
+  const stelle = state.abspielBeginn + (audio.src ? audio.currentTime : 0);
+  state.hoeren = hoertB() ? "a" : "b";
+  abLabel();
+  if (!audio.src || !state.boxes.length) return;   // gilt ab dem nächsten Abspielen
+  audio.pause();
+  state.abspielBeginn = stelle;
+  audio.src = segmentQuelle(stelle);
+  if (lief) abspielen();
+  else $("play").textContent = T("player.resume");
+}
+
 audio.addEventListener("timeupdate", () => {
   const b = state.boxes[0];
   if (!b) return;
   const span = Math.max(b.t1 - b.t0, 1e-6);
-  const frac = Math.min(audio.currentTime / span, 1);
+  const gespielt = state.abspielBeginn + audio.currentTime;
+  const frac = Math.min(gespielt / span, 1);
   const wrap = $("imgwrap").getBoundingClientRect();
   const ph = $("playhead");
   ph.hidden = false;
@@ -569,7 +652,7 @@ audio.addEventListener("timeupdate", () => {
   ph.style.top = b.y0 * wrap.height + "px";
   const last = state.boxes[state.boxes.length - 1];
   ph.style.height = (last.y1 - b.y0) * wrap.height + "px";
-  $("postime").textContent = fmtTime(b.t0 + audio.currentTime * 1);
+  $("postime").textContent = fmtTime(b.t0 + gespielt);
 });
 audio.addEventListener("ended", () => { $("play").textContent = T("player.play"); });
 
@@ -584,6 +667,8 @@ async function loadReport(compare) {
       q.set("b_root", state.b.root); q.set("b", state.b.path);
       q.set("align", $("align").checked ? "1" : "0");
       const st = await jget("/api/compare.json?" + q);
+      // Versatz fürs A/B-Hören; die Nullprobe liefert ihn später sample-genau
+      if (!state.versatzGenau) state.versatz = st.offset_s || 0;
       rep.innerHTML = "";
       rep.appendChild(cmpCard("A", st.a));
       rep.appendChild(cmpCard("B", st.b));
@@ -906,6 +991,8 @@ async function runNullTest() {
     q.set("a_root", state.a.root); q.set("a", state.a.path);
     q.set("b_root", state.b.root); q.set("b", state.b.path);
     const n = await jget("/api/nulltest?" + q);
+    state.versatz = n.offset_ms / 1000;
+    state.versatzGenau = true;
     const old = document.getElementById("nullcard");
     if (old) old.remove();
     const c = card(T("card.nulltest"), [
@@ -938,6 +1025,7 @@ async function makeResidual() {
     const q = new URLSearchParams(params());
     q.set("a_root", state.a.root); q.set("a", state.a.path);
     q.set("b_root", state.b.root); q.set("b", state.b.path);
+    q.set("gain_db", $("residual_gain").value || "0");
     const r = await jget("/api/residual.json?" + q);
     const old = document.getElementById("rescard");
     if (old) old.remove();
@@ -1143,6 +1231,7 @@ function initEvents() {
     if (!state.a || !state.b) return;      // sonst bliebe ein leerer Slot zurück
     [state.a, state.b] = [state.b, state.a];
     state.zoom = null;
+    state.versatz = -state.versatz;
     markSelection();
     render();
   };
@@ -1150,6 +1239,7 @@ function initEvents() {
   $("preset").onchange = (e) => applyPreset(e.target.value);
   $("reset-zoom").onclick = () => { state.zoom = null; render(); };
   $("play").onclick = playSegment;
+  $("abswitch").onclick = switchAB;
   $("permalink").onclick = async () => {
     writeHash();
     try {
@@ -1185,6 +1275,7 @@ function initEvents() {
   document.addEventListener("keydown", (e) => {
     if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
     if (e.key === " ") { e.preventDefault(); playSegment(); }
+    if (e.key === "x" || e.key === "X") switchAB();
     if (e.key === "Escape" && state.zoom) { state.zoom = null; render(); }
     if (e.key === "Enter") render();
   });
@@ -1193,6 +1284,7 @@ function initEvents() {
 
 (async function main() {
   applyStaticTexts();
+  abLabel();
   await loadConfig();
   initEvents();
   initZoom();

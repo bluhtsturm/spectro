@@ -79,6 +79,7 @@ from .params import (  # noqa: F401
     plt_colormaps,
     set_language,)
 from .render import (  # noqa: F401
+    RENDER_VERSION,
     _fmt_time,
     _imel,
     _mel,

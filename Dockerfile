@@ -20,8 +20,8 @@ ENV PYTHONUNBUFFERED=1 \
     SIDECAR_DIR=/data/index
 
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt requirements-lock.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -c requirements-lock.txt
 
 COPY app ./app
 COPY spectro.py .

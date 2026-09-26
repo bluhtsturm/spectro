@@ -48,6 +48,8 @@ window.I18N = {
     "ctl.nulltestTitle": "Sample-genaue Nullprobe A gegen B",
     "ctl.residual": "Residual anhören",
     "ctl.residualTitle": "Differenz A−B als hörbare Datei",
+    "ctl.residualGain": "Anhebung [dB]",
+    "ctl.residualGainTitle": "Residual beim Anhören anheben [dB] – leise Reste werden hörbar",
     "ctl.clicks": "Störungen suchen",
     "ctl.wow": "Gleichlauf messen",
     "ctl.sweep": "Frequenzgang messen",
@@ -74,8 +76,12 @@ window.I18N = {
     "player.link": "Link kopieren",
     "player.linkCopied": "kopiert ✓",
     "player.linkFallback": "Link steht in der Adresszeile",
+    "player.listen": "Hören: {slot}",
+    "player.abTitle": "zwischen A und B umschalten, auch während der Wiedergabe (Taste X)",
     "msg.analysisFailed": "Analyse fehlgeschlagen: {msg}",
-    "msg.uploading": "lade {n} Datei(en) hoch …",
+    "msg.uploadProgress": "lade hoch ({i}/{n}): {name} – {pct} %",
+    "msg.network": "keine Verbindung zum Server",
+    "msg.deleteFailed": "Löschen fehlgeschlagen: {msg}",
     "msg.uploaded": "{n} übernommen",
     "msg.uploadFailed": "Upload fehlgeschlagen: {msg}",
     "msg.playback": "Wiedergabe: {msg}",
@@ -196,6 +202,8 @@ window.I18N = {
     "ctl.nulltestTitle": "sample-accurate null test of A against B",
     "ctl.residual": "Hear residual",
     "ctl.residualTitle": "difference A−B as an audible file",
+    "ctl.residualGain": "Boost [dB]",
+    "ctl.residualGainTitle": "boost the residual for listening [dB] – makes quiet remains audible",
     "ctl.clicks": "Find disturbances",
     "ctl.wow": "Measure speed stability",
     "ctl.sweep": "Measure frequency response",
@@ -222,8 +230,12 @@ window.I18N = {
     "player.link": "Copy link",
     "player.linkCopied": "copied ✓",
     "player.linkFallback": "link is in the address bar",
+    "player.listen": "Listening: {slot}",
+    "player.abTitle": "switch between A and B, also during playback (key X)",
     "msg.analysisFailed": "Analysis failed: {msg}",
-    "msg.uploading": "uploading {n} file(s) …",
+    "msg.uploadProgress": "uploading ({i}/{n}): {name} – {pct} %",
+    "msg.network": "no connection to the server",
+    "msg.deleteFailed": "Deleting failed: {msg}",
     "msg.uploaded": "{n} accepted",
     "msg.uploadFailed": "Upload failed: {msg}",
     "msg.playback": "Playback: {msg}",
@@ -301,9 +313,13 @@ window.I18N = {
 };
 
 window.LANG = (() => {
-  const gespeichert = null;                       // kein Speicher in Artefakten
+  // Der Server hat schon entschieden - aus ?lang=, Accept-Language und
+  // LANG_DEFAULT, genau wie für Bewertungen und Fehlermeldungen. Die übrigen
+  // Quellen gelten nur, wenn die Seite ohne ihn geöffnet wird.
+  const meta = document.querySelector('meta[name="spectro-lang"]');
   const url = new URLSearchParams(location.search).get("lang");
-  const kandidat = (url || navigator.language || "de").slice(0, 2).toLowerCase();
+  const kandidat = ((meta && meta.content) || url || navigator.language || "de")
+    .slice(0, 2).toLowerCase();
   return window.I18N[kandidat] ? kandidat : "de";
 })();
 

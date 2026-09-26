@@ -1,7 +1,8 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="__LANG__">
 <head>
 <meta charset="utf-8">
+<meta name="spectro-lang" content="__LANG__">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>spectro</title>
 <link rel="stylesheet" href="/static/style.css">
@@ -112,6 +113,8 @@
         <label><span data-i18n="ctl.diffRange"></span>
           <input id="diff_range" type="number" min="3" max="96" step="3" value="24"></label>
         <button id="nulltest" class="ghost" data-i18n="ctl.nulltest" data-i18n-title="ctl.nulltestTitle"></button>
+        <label data-i18n-title="ctl.residualGainTitle"><span data-i18n="ctl.residualGain"></span>
+          <input id="residual_gain" type="number" min="-20" max="40" step="3" value="0"></label>
         <button id="residual" class="ghost" data-i18n="ctl.residual" data-i18n-title="ctl.residualTitle"></button>
       </div>
       <div class="ctl-group">
@@ -140,6 +143,7 @@
         </div>
         <div id="transport">
           <button id="play" class="ghost" data-i18n="player.play"></button>
+          <button id="abswitch" class="ghost compare-only" data-i18n-title="player.abTitle"></button>
           <span id="postime">0:00</span>
           <span class="spacer"></span>
           <a id="dl" class="ghost" download data-i18n="player.save"></a>
