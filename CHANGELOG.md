@@ -96,6 +96,23 @@ line scans now file their results under the scanned folder instead of under
   of deleted, changed or no longer mounted files and of older analysis versions
 - `--jobs` for the command line scan (default: half the CPU count)
 
+## [1.0.1] – 2026-09-13
+
+Analysis version unchanged (12).
+
+### Fixed
+
+- The result index only checked whether its folder could be created. An
+  existing but read-only folder therefore counted as usable: the index reported
+  itself active while discarding every entry, and every scan recomputed
+  everything without anyone noticing. It now writes a test file at startup
+- An unusable index path switched the index off entirely. It now falls back to
+  `~/.cache/spectro/index` and writes a warning to the log
+
+### Changed
+
+- CI and release use `actions/checkout@v5` and `actions/setup-python@v6`
+
 ## [1.0.0] – 2026-09-12
 
 First release. Analysis version 12.

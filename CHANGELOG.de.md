@@ -97,6 +97,23 @@ dem Scan-Ordner ab statt unter `cli` und rechnen deshalb einmal neu;
   aus älteren Analyseversionen
 - `--jobs` für den Scan der Kommandozeile (Standard: halbe CPU-Zahl)
 
+## [1.0.1] – 13.09.2026
+
+Analyseversion unverändert (12).
+
+### Behoben
+
+- Die Ergebnisablage prüfte nur, ob sich ihr Ordner anlegen ließ. Ein
+  vorhandener, aber schreibgeschützter Ordner galt deshalb als nutzbar: die
+  Ablage meldete sich aktiv, verwarf aber jeden Eintrag, und jeder Scan rechnete
+  alles neu, ohne dass es auffiel. Beim Start schreibt sie jetzt eine Probedatei
+- Ein unbrauchbarer Ablagepfad schaltete die Ablage ganz ab. Jetzt weicht sie
+  auf `~/.cache/spectro/index` aus und schreibt eine Warnung ins Protokoll
+
+### Geändert
+
+- CI und Release nutzen `actions/checkout@v5` und `actions/setup-python@v6`
+
 ## [1.0.0] – 12.09.2026
 
 Erste Fassung. Analyseversion 12.
