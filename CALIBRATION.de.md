@@ -199,7 +199,7 @@ durchgehend mit Medianen über Zeitfenster, nicht mit Mittelwerten.
 
 ---
 
-## 7. Dauertöne: drei Bedingungen gleichzeitig
+## 7. Dauertöne: vier Bedingungen gleichzeitig
 
 **Die Regel.** Ein Ton gilt als Einstreuung, wenn er schmal ist (höchstens
 60 Hz bei −6 dB), leise gegenüber dem Programm (mindestens 30 dB unter dem

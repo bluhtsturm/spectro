@@ -134,7 +134,7 @@ the API are checked against the configured roots, so `../` cannot break out.
   typical for a lossy encoding of the same source, and a correlation near zero
   simply means different material.
 - The **language** switch sits in the top right; `?lang=en` works as well, and
-  without it the browser's `Accept-Language` decides.
+  without it the browser's `Accept-Language` decides, then `LANG_DEFAULT`.
 
 ## Command line
 

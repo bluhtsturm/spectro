@@ -135,6 +135,8 @@ möglich.
   nur andeutet: Nulltiefe unter −60 dB heißt praktisch identisch, −20 bis
   −40 dB ist typisch für eine verlustbehaftete Kodierung derselben Quelle, und
   eine Korrelation nahe null bedeutet schlicht anderes Material.
+- Die **Sprache** wird oben rechts umgeschaltet; `?lang=en` geht ebenso, ohne
+  Angabe entscheidet das `Accept-Language` des Browsers, danach `LANG_DEFAULT`.
 
 ## CLI
 
@@ -147,9 +149,11 @@ Das Kommandozeilenwerkzeug nutzt denselben Analysekern:
 ./spectro.py --compare original.flac rip.m4a -o vergleich.png
 ./spectro.py --compare a.flac b.flac --null --json   # Nullprobe als JSON
 ./spectro.py --compare roh.flac restauriert.flac --residual weg.flac
-./spectro.py --start 90 --duration 30 --fmax 8000 mitschnitt.opus
+./spectro.py --scan /srv/nas/musik --index ~/.cache/spectro --csv bericht.csv
 ./spectro.py --scan /srv/nas/musik --index ~/.cache/spectro -j 8   # 8 Dateien zugleich
 ./spectro.py --prune --index ~/.cache/spectro   # Einträge gelöschter Dateien entfernen
+./spectro.py --start 90 --duration 30 --fmax 8000 mitschnitt.opus
+./spectro.py --lang en --cutoff --lowfreq --clicks album.flac   # Ausgabe auf Englisch
 ./spectro.py --uploads                           # Uploads auflisten
 ./spectro.py --uploads --delete probe.flac --yes
 ./spectro.py --uploads --delete-all
@@ -323,18 +327,6 @@ Die Texte der Oberfläche stehen in `app/i18n.py` (Bewertungen, CLI) und
 Eintrag; am Analysecode ändert sich nichts. Ein Test prüft, dass alle Sprachen
 dieselben Schlüssel und dieselben Platzhalter tragen.
 
-## Veröffentlichungen
-
-Ein Tag `v1.2.3` baut ein Image für amd64 und arm64 und veröffentlicht es auf
-`ghcr.io`. [CHANGELOG.md](CHANGELOG.md) hält fest, was sich geändert hat;
-`ANALYSIS_VERSION` in `app/core.py` steigt, sobald sich Messung oder Bewertung
-ändern – Cache und Ergebnisablage werden dadurch ungültig, damit kein alter
-Befund ein Update überlebt.
-
-Image und CI installieren die in `requirements-lock.txt` festgelegten Fassungen;
-`requirements.txt` nennt nur die Untergrenzen. Dependabot schlägt Aktualisierungen
-der Fassungen, der Actions und des Basis-Images als Pull Request vor.
-
 ## Grenzen
 
 Alle Einstufungen sind Heuristiken und an echten Aufnahmen kalibriert: Rips von
@@ -348,3 +340,19 @@ Analyse unsichtbar. Transcodes mit künstlicher
 Rauschauffüllung oberhalb der Grenzfrequenz lassen sich ebenfalls nicht
 erkennen. Bei der Störungssuche gilt: was sie
 findet, ist ein Vorschlag zum Nachhören, keine Diagnose.
+
+## Veröffentlichungen
+
+Ein Tag `v1.2.3` baut ein Image für amd64 und arm64 und veröffentlicht es auf
+`ghcr.io`. [CHANGELOG.de.md](CHANGELOG.de.md) hält fest, was sich geändert hat;
+`ANALYSIS_VERSION` in `app/core.py` steigt, sobald sich Messung oder Bewertung
+ändern – Cache und Ergebnisablage werden dadurch ungültig, damit kein alter
+Befund ein Update überlebt.
+
+Image und CI installieren die in `requirements-lock.txt` festgelegten Fassungen;
+`requirements.txt` nennt nur die Untergrenzen. Dependabot schlägt Aktualisierungen
+der Fassungen, der Actions und des Basis-Images als Pull Request vor.
+
+## Lizenz
+
+MIT – siehe [LICENSE](LICENSE).
