@@ -10,7 +10,7 @@ The analysis version (`ANALYSIS_VERSION` in `app/core.py`) goes up whenever a
 measurement or a verdict changes. That invalidates cache and result index, so
 that no stale verdicts are served after an update.
 
-## [Unreleased]
+## [1.1.0] – 2026-09-26
 
 Analysis version unchanged (12): scan results and the verdicts on individual
 files stay the same, the result index of the interface does not need to be
