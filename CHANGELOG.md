@@ -8,6 +8,38 @@ Die Analyseversion (`ANALYSIS_VERSION` in `app/core.py`) wird erhöht, sobald
 sich Messung oder Bewertung ändern. Cache und Ergebnisablage werden dadurch
 ungültig, damit nach einem Update keine alten Bewertungen ausgeliefert werden.
 
+## [Unreleased]
+
+Analyseversion unverändert (12): Scan-Ergebnisse und die Bewertung einzelner
+Dateien bleiben gleich, die Ergebnisablage muss nicht neu gerechnet werden.
+
+### Behoben
+
+- `--cutoff` auf der Kommandozeile urteilte bei der FFT-Größe des Bildes
+  (Standard 2048) statt bei der Bezugsauflösung 4096 und konnte deshalb
+  anders ausfallen als Oberfläche und `--json`
+- Das Bandurteil übernahm ein vorhandenes Spektrum auch dann, wenn es aus
+  einem einzelnen Kanal oder mit anderer Überlappung entstanden war
+- Die Kennzahlen eines Vergleichs wurden neu gerechnet, sobald sich nur die
+  Darstellung änderte (Differenzbereich, Differenzbild aus, Farbskala,
+  Bildgröße); sie liegen jetzt unabhängig davon im Cache
+- Residual und Cache-Dateien werden über eine eigene Zwischendatei
+  geschrieben: ein Abbruch oder zwei gleichzeitige Anfragen hinterlassen keine
+  halbe Datei mehr, die danach als gültig ausgeliefert würde
+- Die Energieverteilung zählte die Grenzfrequenzen doppelt, die Anteile
+  ergaben zusammen etwas mehr als 100 %
+- Der CSV-Export der Oberfläche hatte zwei unübersetzte Spaltenköpfe
+- `numpy>=2.0` als Mindestversion: die Gleichlaufmessung nutzt
+  `np.trapezoid`, das es vorher nicht gab
+
+### Geändert
+
+- Die Störungssuche arbeitet streamend: zehn Minuten in 44,1 kHz brauchen
+  31 MB statt 2,5 GB und sind siebenmal so schnell
+- Das Residual rechnet blockweise: fünf Minuten 96 kHz Stereo brauchen 630 MB
+  statt 3,1 GB. Die Länge ist wie dokumentiert auf `max_seconds` begrenzt,
+  auch wenn eine längere `duration` angefragt wird
+
 ## [1.0.0] – 12.09.2026
 
 Erste Fassung. Analyseversion 12.

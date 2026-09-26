@@ -325,7 +325,10 @@ def band_energy(mag: np.ndarray, sr: int, nfft: int) -> list:
     for lo, hi in zip(edges[:-1], edges[1:], strict=False):
         if lo >= sr / 2:
             break
-        i0, i1 = int(lo / df), min(int(hi / df) + 1, power.size)
+        # Obergrenze exklusiv, damit kein Bin in zwei Baendern zaehlt; das
+        # oberste Band reicht bis einschliesslich Nyquist
+        i0 = int(lo / df)
+        i1 = power.size if hi >= sr / 2 else int(hi / df)
         out.append({"lo": lo, "hi": min(hi, sr / 2),
                     "share": float(power[i0:i1].sum() / total)})
     return out
@@ -343,7 +346,11 @@ def band_report(path: str, p: Params, mag=None, sr: int | None = None,
     FFT-Groesse jemand fuer die Darstellung gewaehlt hat.
     """
     lang = lang or p.lang
-    if mag is not None and p.nfft == REFERENCE_NFFT and sr:
+    # Wiederverwenden nur, wenn das Spektrum genau so entstanden ist wie das
+    # eigene: gleiche Aufloesung, Summe der Kanaele, gleiche Ueberlappung.
+    # Sonst urteilte etwa die Ansicht "links" nur ueber einen Kanal.
+    if (mag is not None and sr and p.nfft == REFERENCE_NFFT
+            and p.channels == "mix" and p.overlap == 0.5):
         return band_analysis(mag, sr, REFERENCE_NFFT, codec, lang=lang)
     ref = Params(**{**p.as_dict(), "nfft": REFERENCE_NFFT,
                     "overlap": 0.5, "channels": "mix"})

@@ -52,6 +52,60 @@ class TestStoerungssuche:
         with pytest.raises(core.AudioError):
             core.impulse_scan(str(p))
 
+    def test_streamend_gleich_wie_am_stueck(self, media):
+        """Die blockweise Rechnung liefert exakt die Werte der Rechnung am Stück.
+
+        Die Impulse sitzen bewusst an den Blockgrenzen der Dekodierung, dort
+        würde ein Versatz der Rahmen zuerst auffallen.
+        """
+        from app import measure
+        from conftest import write_pcm, noise, tone, SR
+        p = media / "blockgrenzen.flac"
+        if not p.exists():
+            n = SR * 20
+            x = noise(n, seed=11) * 0.2 + tone(n, 300, amp=0.15)
+            grenze = core.CHUNK_BYTES // 4
+            for s in (grenze - 130, 2 * grenze + 5, 3 * grenze - 1, n - 3000):
+                x[s:s + 3] += np.array([0.9, -0.75, 0.55], dtype=np.float32)
+            write_pcm(p, x, SR)
+
+        nfft, hop, hf_bins, lf_bins = 256, 64, (34, 129), 5
+        hf, lf, n = measure._impulse_envelopes(str(p), SR, None, None, nfft, hop,
+                                               hf_bins, lf_bins)
+        x = core._decode_mono(str(p), SR, max_seconds=3600.0)
+        V = np.lib.stride_tricks.sliding_window_view(x, nfft)[::hop]
+        S = np.abs(np.fft.rfft(V * np.hanning(nfft).astype(np.float32),
+                               axis=1)).astype(np.float32) ** 2
+        assert n == x.size
+        np.testing.assert_array_equal(
+            hf, 10 * np.log10(S[:, hf_bins[0]:hf_bins[1]].sum(axis=1) + 1e-20))
+        np.testing.assert_array_equal(
+            lf, 10 * np.log10(S[:, :lf_bins].sum(axis=1) + 1e-20))
+
+        r = core.impulse_scan(str(p))
+        assert r["count"] == 4, [e["t"] for e in r["events"]]
+
+    def test_speicher_waechst_nicht_mit_der_laenge(self, media):
+        """Zwei Minuten dürfen nicht mehr Speicher kosten als ein Block.
+
+        Vorher lag die STFT der ganzen Datei auf einmal im Speicher: zehn
+        Minuten in 44,1 kHz kosteten 2,5 GB, jetzt rund 30 MB.
+        """
+        import tracemalloc
+        from conftest import ff
+        p = media / "zwei_minuten.flac"
+        if not p.exists():
+            ff(["-f", "lavfi", "-i", "anoisesrc=d=120:c=pink:a=0.1:r=44100",
+                "-c:a", "flac", str(p)])
+        tracemalloc.start()
+        try:
+            core.impulse_scan(str(p))
+            spitze = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+        # das dekodierte Signal allein wären 21 MB
+        assert spitze < 64 * 2**20, spitze / 2**20
+
 
 class TestTiefton:
     def test_netzbrumm_wird_gefunden(self, hum):
