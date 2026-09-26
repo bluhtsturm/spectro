@@ -86,11 +86,13 @@ liegen im Named Volume `spectro-data`.
 |---|---|---|
 | `MEDIA_DIRS` | – | `Label=/pfad` je Ordner, mit `:` getrennt |
 | `PORT` | 8080 | Port auf dem Host |
-| `MAX_UPLOAD_MB` | 1024 | Größenlimit je hochgeladener Datei |
+| `MAX_UPLOAD_MB` | 1024 | Größenlimit je hochgeladener Datei, geprüft schon beim Empfang |
 | `CACHE_MAX_MB` | 2048 | Obergrenze des PNG-Caches (LRU-Bereinigung) |
 | `MAX_RENDERS` | halbe CPU-Zahl | gleichzeitige Analysen |
-| `AUTH_USER` / `AUTH_PASS` | leer | optionale HTTP-Basic-Absicherung |
-| `LANG_DEFAULT` | de | Sprache, wenn der Browser keine Vorgabe schickt |
+| `SCAN_JOBS` | wie `MAX_RENDERS` | gleichzeitig geprüfte Dateien, über alle laufenden Scans zusammen |
+| `MAX_STREAMS` | doppelt `MAX_RENDERS`, mindestens 4 | gleichzeitige Wiedergaben |
+| `AUTH_USER` / `AUTH_PASS` | leer | optionale HTTP-Basic-Absicherung, aktiv sobald eines gesetzt ist |
+| `LANG_DEFAULT` | de | Sprache, wenn der Browser keine Vorgabe schickt; auch Vorgabe der CLI |
 | `SHOW_ALL_FILES` | 0 | auch Dateien ohne bekannte Audio-Endung anzeigen |
 | `SIDECAR` | 1 | Ergebnisablage für den Scan (0 schaltet sie ab) |
 | `SIDECAR_DIR` | /data/index | Ort der Ablage (weicht auf `~/.cache/spectro/index` aus) |
@@ -119,6 +121,11 @@ möglich.
 - Im Bild einen Bereich **aufziehen** zoomt in Zeit und Frequenz;
   Doppelklick oder `Esc` setzt zurück.
 - `Leertaste` spielt den sichtbaren Ausschnitt ab, die Abspielmarke läuft mit.
+  Im Vergleich schaltet **Hören: A/B** (oder `X`) an derselben musikalischen
+  Stelle auf die andere Datei um – der Versatz zwischen beiden wird
+  ausgeglichen, sample-genau, sobald die Nullprobe gelaufen ist.
+- **Residual** lässt sich um einige dB anheben, damit leise Reste hörbar werden.
+- Uploads zeigen ihren Fortschritt je Datei; das Größenlimit gilt je Datei.
 - Vorlagen (`Lossy-Check`, `Vinyl/Tape`, `Mastering` …) setzen sinnvolle
   Parameterkombinationen in einem Rutsch.
 - **Prüfen** in der Seitenleiste scannt den geöffneten Ordner rekursiv; die
@@ -141,6 +148,8 @@ Das Kommandozeilenwerkzeug nutzt denselben Analysekern:
 ./spectro.py --compare a.flac b.flac --null --json   # Nullprobe als JSON
 ./spectro.py --compare roh.flac restauriert.flac --residual weg.flac
 ./spectro.py --start 90 --duration 30 --fmax 8000 mitschnitt.opus
+./spectro.py --scan /srv/nas/musik --index ~/.cache/spectro -j 8   # 8 Dateien zugleich
+./spectro.py --prune --index ~/.cache/spectro   # Einträge gelöschter Dateien entfernen
 ./spectro.py --uploads                           # Uploads auflisten
 ./spectro.py --uploads --delete probe.flac --yes
 ./spectro.py --uploads --delete-all
@@ -155,7 +164,9 @@ docker compose exec spectro python spectro.py --cutoff /media/musik/album/01.fla
 Wichtige Optionen: `--fft`, `--overlap`, `--window`, `--channels`
 (`mix|left|right|mid|side|all`), `--scale`, `--fmin/--fmax`, `--db-range`,
 `--cmap`, `--theme`, `--raw`, `--max-cols`, `--no-align`, `--no-diff`, `--null`,
-`--clicks`, `--lowfreq`, `--wow`, `--nominal`, `--residual`, `--residual-gain`.
+`--clicks`, `--lowfreq`, `--wow`, `--nominal`, `--sweep`, `--residual`, `--residual-gain`,
+`--scan`, `--index`, `--refresh`, `--prune`, `--jobs`, `--csv`, `--lang`. Hilfe und
+Ausgaben folgen `--lang`; ohne die Angabe entscheidet `LANG_DEFAULT`, sonst Deutsch.
 
 ## HTTP-API
 
@@ -183,6 +194,21 @@ Skripte und Batch-Prüfungen. Interaktive Doku unter `/api/docs`.
 | `POST /api/upload` | Datei-Upload (multipart) |
 | `DELETE /api/upload?path=&path=` | einzelne Uploads löschen |
 | `DELETE /api/uploads` | Upload-Ordner leeren |
+| `GET /api/sweep?root=&path=&reference_hz=` | Frequenzgang und Kanaltrennung |
+| `GET /api/probe?root=&path=` | technische Eckdaten der ersten Audiospur |
+| `GET /api/download?root=&path=` | die Originaldatei |
+| `GET /api/config` | Ordner, Farbskalen, Fenster, Voreinstellungen |
+| `POST /api/index/prune` | Ablage-Einträge gelöschter oder geänderter Dateien entfernen |
+| `GET /healthz` | Zustandsprüfung, antwortet ohne Anmeldung |
+
+Jeder Endpunkt nimmt `?lang=de|en` an. Messergebnisse bleiben im Cache, mit
+einem Schlüssel nur aus dem, was das Ergebnis ändert – eine andere Farbskala
+rechnet keinen Bericht neu. Bilder kommen mit `ETag`; der Browser fragt nach,
+statt ein veraltetes Bild zu behalten.
+
+Das Feld `pattern` in Berichten und Scans trägt feste Kennungen, unabhängig von
+der Sprache: `voll` (kein Steilabfall), `konstant` (konstante Bandkante) und
+`hochgesampelt`. Den lesbaren Text enthält `verdict.text`.
 
 Beispiel – Ordner-Prüfung über die API, nur die Auffälligkeiten:
 
@@ -248,7 +274,8 @@ dort liefert der Decoder Fließkomma-Samples, die Zahl würde nur den Decoder
 beschreiben.
 
 Der **Ordner-Scan** analysiert je Datei einen 60-Sekunden-Ausschnitt aus der
-Mitte und läuft mit `MAX_RENDERS` parallel. Die Ergebnisse landen in der
+Mitte und prüft `SCAN_JOBS` Dateien zugleich – gemeinsam für alle Scans, ein
+zweiter Browser-Tab verdoppelt die Last also nicht. Die Ergebnisse landen in der
 Ablage; ein zweiter Lauf über denselben Ordner kostet dann nur noch
 Millisekunden, und geänderte Dateien werden an Änderungszeit und Größe
 erkannt. Die Oberfläche nutzt `/api/scan/stream` und zeigt jedes Ergebnis, sobald es
@@ -260,17 +287,26 @@ nichts läuft in einen Timeout. Für einen unbeaufsichtigten ersten Durchlauf
 ./spectro.py --scan /srv/nas/musik --index ~/.cache/spectro --csv bericht.csv
 ```
 
+Deckt eine Bildzeile mehrere FFT-Bins ab – große FFT, obere Oktaven der log- und
+Mel-Achse –, zeigt sie den lautesten davon, so wie die Zeitachse ihre Spalten
+verdichtet. Ein schmaler Ton fällt dadurch nie zwischen zwei Zeilen; dafür
+wirkt Rauschen bei großer FFT etwas heller als bei kleiner.
+
+Die **Störungssuche** liest die Datei blockweise und braucht unabhängig von der
+Länge rund 30 MB. Das **Residual** hält beide Fassungen einmal im Speicher (für
+fünf Minuten 96 kHz Stereo rund 630 MB) und rechnet den Rest blockweise.
+
 ## Mitarbeit
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                 # 238 Tests, rund 95 Sekunden
-pytest --ignore=tests/test_browser.py   # ohne Browser, rund 60 Sekunden
+pytest                 # 300 Tests, rund 110 Sekunden
+pytest --ignore=tests/test_browser.py   # ohne Browser, rund 80 Sekunden
 ruff check app spectro.py tests
 ```
 
 Die Testsuite erzeugt alle Prüfsignale selbst mit ffmpeg; im Repository liegt
-kein Audiomaterial. Zwölf der Tests bedienen die Oberfläche in einem echten
+kein Audiomaterial. Fünfzehn der Tests bedienen die Oberfläche in einem echten
 Chromium und scheitern bei jedem Konsolen- oder Seitenfehler – sie brauchen
 `playwright install chromium` und überspringen sich, wenn er fehlt.
 
@@ -294,6 +330,10 @@ Ein Tag `v1.2.3` baut ein Image für amd64 und arm64 und veröffentlicht es auf
 `ANALYSIS_VERSION` in `app/core.py` steigt, sobald sich Messung oder Bewertung
 ändern – Cache und Ergebnisablage werden dadurch ungültig, damit kein alter
 Befund ein Update überlebt.
+
+Image und CI installieren die in `requirements-lock.txt` festgelegten Fassungen;
+`requirements.txt` nennt nur die Untergrenzen. Dependabot schlägt Aktualisierungen
+der Fassungen, der Actions und des Basis-Images als Pull Request vor.
 
 ## Grenzen
 

@@ -12,9 +12,11 @@ Beispiele:
 from __future__ import annotations
 
 import argparse
+import contextvars
 import json
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -22,98 +24,93 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from app import core
 from app.core import AudioError, Params
 from app.i18n import khz as _khz
-from app.i18n import t
-from app.sidecar import SidecarStore
+from app.i18n import normalise, t
+from app.sidecar import FREMD, SidecarStore
 
 
-def build_parser() -> argparse.ArgumentParser:
+def cli_language(argv: list[str] | None = None) -> str:
+    """Sprache schon vor dem eigentlichen Einlesen - die Hilfe braucht sie."""
+    vorab = argparse.ArgumentParser(add_help=False)
+    vorab.add_argument("--lang")
+    ns, _ = vorab.parse_known_args(argv)
+    return normalise(ns.lang or os.environ.get("LANG_DEFAULT") or "de")
+
+
+def build_parser(lang: str = "de") -> argparse.ArgumentParser:
+    def h(key: str) -> str:
+        return t("help." + key, lang)
+
+    datei, ordner = h("meta_file"), h("meta_folder")
     p = argparse.ArgumentParser(
-        description="Erzeugt Spektrogramme aus Audiodateien (Dekodierung via ffmpeg).",
+        description=h("description"),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    p.add_argument("files", nargs="*", metavar="DATEI")
-    p.add_argument("-o", "--output", help="Ziel-PNG (nur bei einer Datei/Vergleich)")
-    p.add_argument("-d", "--outdir", default=".", help="Zielverzeichnis im Batch-Betrieb")
+    p.add_argument("files", nargs="*", metavar=datei)
+    p.add_argument("-o", "--output", help=h("output"))
+    p.add_argument("-d", "--outdir", default=".", help=h("outdir"))
 
-    c = p.add_argument_group("Vergleich")
-    c.add_argument("--compare", nargs=2, metavar=("A", "B"),
-                   help="zwei Dateien uebereinander plotten")
-    c.add_argument("--no-diff", action="store_true", help="Differenzbild weglassen")
-    c.add_argument("--no-align", action="store_true",
-                   help="Zeitversatz nicht automatisch ausgleichen")
-    c.add_argument("--diff-range", type=float, default=24.0,
-                   help="Skala des Differenzbildes [+/- dB]")
-    c.add_argument("--null", action="store_true",
-                   help="zusaetzlich eine sample-genaue Nullprobe rechnen")
-    c.add_argument("--residual", metavar="DATEI",
-                   help="Differenz A-B als hoerbare FLAC-Datei schreiben")
+    c = p.add_argument_group(h("g_compare"))
+    c.add_argument("--compare", nargs=2, metavar=("A", "B"), help=h("compare"))
+    c.add_argument("--no-diff", action="store_true", help=h("no_diff"))
+    c.add_argument("--no-align", action="store_true", help=h("no_align"))
+    c.add_argument("--diff-range", type=float, default=24.0, help=h("diff_range"))
+    c.add_argument("--null", action="store_true", help=h("null"))
+    c.add_argument("--residual", metavar=datei, help=h("residual"))
     c.add_argument("--residual-gain", type=float, default=0.0, metavar="DB",
-                   help="das Residual beim Schreiben anheben [dB]")
+                   help=h("residual_gain"))
 
-    g = p.add_argument_group("Analyse")
-    g.add_argument("-n", "--fft", dest="nfft", type=int, default=2048,
-                   help="FFT-Groesse (Zweierpotenz)")
-    g.add_argument("--overlap", type=float, default=0.75, help="Fensterueberlappung 0..0.95")
-    g.add_argument("-w", "--window", choices=sorted(core.WINDOWS), default="hann")
+    g = p.add_argument_group(h("g_analysis"))
+    g.add_argument("-n", "--fft", dest="nfft", type=int, default=2048, help=h("fft"))
+    g.add_argument("--overlap", type=float, default=0.75, help=h("overlap"))
+    g.add_argument("-w", "--window", choices=sorted(core.WINDOWS), default="hann",
+                   help=h("window"))
     g.add_argument("-c", "--channels",
-                   choices=("mix", "left", "right", "mid", "side", "all"), default="mix")
-    g.add_argument("--sr", type=int, help="Resampling-Rate (Standard: Originalrate)")
-    g.add_argument("--start", type=float, help="Startzeit [s]")
-    g.add_argument("--duration", type=float, help="Laenge [s]")
-    g.add_argument("--scan", metavar="ORDNER",
-                   help="Ordner rekursiv pruefen statt einzelne Dateien zeichnen")
-    g.add_argument("--index", metavar="ORDNER", default=None,
-                   help="Ergebnisablage fuer --scan (nur Geaendertes wird neu gerechnet)")
-    g.add_argument("--refresh", action="store_true",
-                   help="Ablage ignorieren und alles neu messen")
-    g.add_argument("--csv", metavar="DATEI", help="Scan-Ergebnis als CSV schreiben")
-    g.add_argument("--seconds", type=float, default=60.0,
-                   help="Ausschnitt je Datei beim Scan [s]")
-    g.add_argument("--lowfreq", action="store_true",
-                   help="Tiefton, Rumpeln und Netzbrumm untersuchen")
-    g.add_argument("--wow", action="store_true",
-                   help="Gleichlauf messen (braucht einen Dauerton)")
-    g.add_argument("--nominal", type=float, metavar="HZ",
-                   help="Sollfrequenz des Messtons, sonst automatisch")
-    u = p.add_argument_group("Uploads")
-    u.add_argument("--uploads", action="store_true",
-                   help="Uploads auflisten (im Container: /data/uploads)")
-    u.add_argument("--upload-dir", metavar="ORDNER",
-                   help="Ort der Uploads, sonst UPLOAD_DIR oder /data/uploads")
-    u.add_argument("--delete", metavar="NAME", action="append",
-                   help="Upload loeschen, mehrfach angebbar")
-    u.add_argument("--delete-all", action="store_true",
-                   help="alle Uploads loeschen")
-    u.add_argument("--yes", action="store_true",
-                   help="Rueckfrage beim Loeschen uebergehen")
+                   choices=("mix", "left", "right", "mid", "side", "all"), default="mix",
+                   help=h("channels"))
+    g.add_argument("--sr", type=int, help=h("sr"))
+    g.add_argument("--start", type=float, help=h("start"))
+    g.add_argument("--duration", type=float, help=h("duration"))
+    g.add_argument("--scan", metavar=ordner, help=h("scan"))
+    g.add_argument("--index", metavar=ordner, default=None, help=h("index"))
+    g.add_argument("--refresh", action="store_true", help=h("refresh"))
+    g.add_argument("--prune", action="store_true", help=h("prune"))
+    g.add_argument("-j", "--jobs", type=int, default=max(1, (os.cpu_count() or 2) // 2),
+                   help=h("jobs"))
+    g.add_argument("--csv", metavar=datei, help=h("csv"))
+    g.add_argument("--seconds", type=float, default=60.0, help=h("seconds"))
+    g.add_argument("--lowfreq", action="store_true", help=h("lowfreq"))
+    g.add_argument("--wow", action="store_true", help=h("wow"))
+    g.add_argument("--nominal", type=float, metavar="HZ", help=h("nominal"))
+    g.add_argument("--sweep", action="store_true", help=h("sweep"))
+    g.add_argument("--clicks", action="store_true", help=h("clicks"))
+    g.add_argument("--cutoff", action="store_true", help=h("cutoff"))
+    g.add_argument("--json", action="store_true", help=h("json"))
+    g.add_argument("--no-image", action="store_true", help=h("no_image"))
 
-    g.add_argument("--sweep", action="store_true",
-                   help="Frequenzgang und Kanaltrennung aus einer Tonfolge")
-    g.add_argument("--clicks", action="store_true",
-                   help="Impulsstoerungen (Knackser) suchen und auflisten")
-    g.add_argument("--cutoff", action="store_true",
-                   help="Bandbreite schaetzen und bewerten (Lossy-Erkennung)")
-    g.add_argument("--json", action="store_true",
-                   help="vollstaendigen Analysebericht als JSON ausgeben")
-    g.add_argument("--no-image", action="store_true", help="kein PNG schreiben")
+    u = p.add_argument_group(h("g_uploads"))
+    u.add_argument("--uploads", action="store_true", help=h("uploads"))
+    u.add_argument("--upload-dir", metavar=ordner, help=h("upload_dir"))
+    u.add_argument("--delete", metavar="NAME", action="append", help=h("delete"))
+    u.add_argument("--delete-all", action="store_true", help=h("delete_all"))
+    u.add_argument("--yes", action="store_true", help=h("yes"))
 
-    v = p.add_argument_group("Darstellung")
-    v.add_argument("-s", "--scale", choices=("linear", "log", "mel"), default="linear")
-    v.add_argument("--fmin", type=float, default=0.0)
-    v.add_argument("--fmax", type=float)
-    v.add_argument("--db-range", type=float, default=100.0)
-    v.add_argument("--db-top", type=float, default=0.0)
-    v.add_argument("--cmap", default="magma")
-    v.add_argument("--theme", choices=("dark", "light"), default="light")
-    v.add_argument("--width", type=float, default=14.0)
-    v.add_argument("--height", type=float, default=5.0)
-    v.add_argument("--dpi", type=int, default=110)
-    v.add_argument("--max-cols", type=int, default=4000)
-    v.add_argument("--raw", action="store_true", help="nur Grafik, ohne Achsen")
-    v.add_argument("--title")
-    v.add_argument("--lang", choices=("de", "en"), default="de",
-                   help="Sprache der Bewertungstexte")
-    v.add_argument("-q", "--quiet", action="store_true")
+    v = p.add_argument_group(h("g_display"))
+    v.add_argument("-s", "--scale", choices=("linear", "log", "mel"), default="linear",
+                   help=h("scale"))
+    v.add_argument("--fmin", type=float, default=0.0, help=h("fmin"))
+    v.add_argument("--fmax", type=float, help=h("fmax"))
+    v.add_argument("--db-range", type=float, default=100.0, help=h("db_range"))
+    v.add_argument("--db-top", type=float, default=0.0, help=h("db_top"))
+    v.add_argument("--cmap", default="magma", help=h("cmap"))
+    v.add_argument("--theme", choices=("dark", "light"), default="light", help=h("theme"))
+    v.add_argument("--width", type=float, default=14.0, help=h("width"))
+    v.add_argument("--height", type=float, default=5.0, help=h("height"))
+    v.add_argument("--dpi", type=int, default=110, help=h("dpi"))
+    v.add_argument("--max-cols", type=int, default=4000, help=h("max_cols"))
+    v.add_argument("--raw", action="store_true", help=h("raw"))
+    v.add_argument("--title", help=h("title"))
+    v.add_argument("--lang", choices=("de", "en"), default=lang, help=h("lang"))
+    v.add_argument("-q", "--quiet", action="store_true", help=h("quiet"))
     return p
 
 
@@ -135,16 +132,46 @@ def unique_out(outdir: str, path: str, written: set) -> str:
     return cand if cand not in written else os.path.join(outdir, base + ".png")
 
 
+def open_index(args) -> SidecarStore:
+    try:
+        return SidecarStore(args.index)
+    except OSError as e:
+        sys.exit(t("cli.index_unusable", args.lang, msg=e))
+
+
+def cli_quelle(root: str | None, rel: str):
+    """Eintraege der Kommandozeile tragen den absoluten Scan-Ordner als Wurzel.
+
+    Aeltere Fassungen schrieben fuer jeden Ordner "cli" - solche Eintraege
+    lassen sich keiner Datei mehr zuordnen. Eintraege der Weboberflaeche
+    (Ordnerschluessel wie "musik") bleiben unangetastet, falls sich beide
+    eine Ablage teilen.
+    """
+    if root and os.path.isabs(root):
+        return Path(root) / rel
+    return None if root == "cli" else FREMD
+
+
+def prune_index(args) -> int:
+    if not args.index:
+        sys.exit(t("cli.index_needed", args.lang))
+    stand = open_index(args).prune(cli_quelle)
+    if not args.quiet:
+        print(t("cli.prune", args.lang, **stand))
+    return 0
+
+
 def scan_folder(args, p: Params) -> int:
     """Rekursive Ordnerpruefung mit optionaler Ergebnisablage."""
     root = os.path.abspath(args.scan)
     if not os.path.isdir(root):
-        sys.exit(f"Fehler: {args.scan} ist kein Verzeichnis")
-    store = SidecarStore(args.index)
+        sys.exit(t("cli.not_a_dir", args.lang, path=args.scan))
+    store = open_index(args)
     kind = f"quickcheck:{int(args.seconds)}:{args.lang}"
 
     dateien = []
-    for pfad, _, namen in os.walk(root):
+    for pfad, unter, namen in os.walk(root):
+        unter[:] = sorted(d for d in unter if not d.startswith("."))
         for n in sorted(namen):
             if n.startswith("."):
                 continue
@@ -152,33 +179,52 @@ def scan_folder(args, p: Params) -> int:
                 dateien.append(os.path.join(pfad, n))
     dateien.sort()
 
-    zeilen, gerechnet, fehler = [], 0, 0
-    for f in dateien:
+    def pruefen(f: str):
+        """Eine Datei - laeuft in einem der Arbeits-Threads."""
         rel = os.path.relpath(f, root)
-        res = None if args.refresh else store.load("cli", rel, Path(f), kind)
-        if res is None:
-            try:
-                res = core.quickcheck(f, args.seconds, lang=args.lang)
-            except AudioError as e:
+        if not args.refresh:
+            res = store.load(root, rel, Path(f), kind)
+            if res is not None:
+                return rel, res, False, None
+        try:
+            res = core.quickcheck(f, args.seconds, lang=args.lang)
+        except Exception as e:           # eine kaputte Datei beendet nicht den Scan
+            meldung = str(e).replace(root + "/", "").replace(root, "")
+            return rel, None, False, meldung or type(e).__name__
+        store.save(root, rel, Path(f), kind, res)
+        return rel, res, True, None
+
+    zeilen, gerechnet, fehler = [], 0, 0
+    # Mehrere Dateien zugleich; ausgegeben wird trotzdem in fester Reihenfolge.
+    # Jede Aufgabe bekommt eine Kopie des Kontexts, damit auch Fehlermeldungen
+    # aus dem Kern in der gewaehlten Sprache erscheinen.
+    pool = ThreadPoolExecutor(max_workers=max(1, args.jobs))
+    try:
+        auftraege = [pool.submit(contextvars.copy_context().run, pruefen, f)
+                     for f in dateien]
+        for auftrag, f in zip(auftraege, dateien, strict=True):
+            rel, res, neu, meldung = auftrag.result()
+            if meldung is not None:
                 fehler += 1
                 # der Pfad steht schon in einer eigenen Spalte
-                meldung = str(e).replace(root + "/", "").replace(root, "")
                 zeilen.append({"path": rel, "name": os.path.basename(f),
                                "error": meldung[:160]})
                 if not args.quiet:
                     print(t("cli.error_at", args.lang, path=rel,
                             msg=meldung[:80]), file=sys.stderr)
                 continue
-            gerechnet += 1
-            store.save("cli", rel, Path(f), kind, res)
-        res = {**res, "path": rel}
-        zeilen.append(res)
-        if not args.quiet and not args.json:
-            v = res.get("verdict", {})
-            kante = f"{res['cutoff_hz']/1000:.1f}k" if res.get("cutoff_hz") else "-"
-            print(f"  [{v.get('level','?'):4s}] {kante:>7s}  {rel}")
-            if v.get("level") == "warn":
-                print(f"          {v.get('text','')}")
+            gerechnet += int(neu)
+            res = {**res, "path": rel}
+            zeilen.append(res)
+            if not args.quiet and not args.json:
+                v = res.get("verdict", {})
+                kante = f"{res['cutoff_hz']/1000:.1f}k" if res.get("cutoff_hz") else "-"
+                print(f"  [{v.get('level','?'):4s}] {kante:>7s}  {rel}")
+                if v.get("level") == "warn":
+                    print(f"          {v.get('text','')}")
+    finally:
+        # bei Strg+C nicht erst alle ausstehenden Dateien abarbeiten
+        pool.shutdown(wait=True, cancel_futures=True)
 
     warn = sum(1 for z in zeilen if (z.get("verdict") or {}).get("level") == "warn")
     if args.json:
@@ -248,8 +294,8 @@ def manage_uploads(args) -> int:
             namen = ", ".join(f.name for f in ziele[:5])
             if len(ziele) > 5:
                 namen += " …"
-            antwort = input(t("cli.up_confirm", args.lang,
-                              n=len(ziele), namen=namen) + " [j/N] ")
+            antwort = input(t("cli.up_confirm", args.lang, n=len(ziele), namen=namen)
+                            + " " + t("cli.yes_no", args.lang) + " ")
             if antwort.strip().lower() not in ("j", "y", "ja", "yes"):
                 return 0
         bytes_ = 0
@@ -275,28 +321,35 @@ def manage_uploads(args) -> int:
 
 
 def main() -> int:
-    args = build_parser().parse_args()
+    sprache = cli_language()
+    core.set_language(sprache)
+    args = build_parser(sprache).parse_args()
     core.set_language(args.lang)
     if args.uploads or args.delete or args.delete_all:
         return manage_uploads(args)
+    if args.prune and not args.scan:
+        return prune_index(args)
     if args.scan:
         try:
-            return scan_folder(args, params_from(args))
+            rc = scan_folder(args, params_from(args))
         except ValueError as e:
-            sys.exit(f"Fehler: {e}")
+            sys.exit(t("cli.error", args.lang, msg=e))
+        if args.prune:
+            prune_index(args)
+        return rc
     if not args.files and not args.compare:
-        build_parser().print_help()
+        build_parser(args.lang).print_help()
         return 2
     try:
         p = params_from(args)
     except ValueError as e:
-        sys.exit(f"Fehler: {e}")
+        sys.exit(t("cli.error", args.lang, msg=e))
 
     if args.compare:
         a, b = args.compare
         panels, stats = core.compare(a, b, p, align=not args.no_align,
                                      show_diff=not args.no_diff)
-        out = args.output or os.path.join(args.outdir, "vergleich.png")
+        out = args.output or os.path.join(args.outdir, t("cli.compare_png", args.lang))
         core.render(panels, p, out,
                     title=f"{os.path.basename(a)}   ↔   {os.path.basename(b)}",
                     subtitle=f"FFT {p.nfft} · {p.window} · {p.scale} · "
@@ -319,22 +372,21 @@ def main() -> int:
         elif not args.quiet:
             for k in ("a", "b"):
                 s = stats[k]
-                co = f"{s['cutoff']/1000:.1f} kHz" if s["cutoff"] else "n/a"
-                print(f"{k.upper()}: {s['name']} · {s['codec']} · "
-                      f"{s['sample_rate']/1000:g} kHz · Cutoff {co}")
+                co = _khz(s["cutoff"], args.lang) if s["cutoff"] else "–"
+                print(t("cli.cmp_file", args.lang, tag=k.upper(), name=s["name"],
+                        codec=s["codec"], rate=s["sample_rate"] / 1000, edge=co))
                 print(f"   {s['verdict']['text']}")
             if "diff" in stats:
                 d = stats["diff"]
-                print(f"Differenz: Median {d['median_db']:+.2f} dB, "
-                      f"90-Perzentil |Δ| {d['p90_abs_db']:.2f} dB, "
-                      f"Versatz {stats['offset_s']:+.3f} s")
+                print(t("cli.diff", args.lang, median=d["median_db"],
+                        p90=d["p90_abs_db"], offset=stats["offset_s"]))
             n = stats.get("null")
             if n and "error" not in n:
                 print(t("cli.null", args.lang, depth=n["residual_db"],
                         corr=n["correlation"], offset=n["offset_ms"]))
                 print(f"   {n['verdict']['text']}")
             elif n:
-                print(f"Nullprobe: {n['error']}")
+                print(t("cli.null_error", args.lang, msg=n["error"]))
             rs = stats.get("residual")
             if rs and "error" not in rs:
                 print(t("cli.residual", args.lang, path=rs["path"],
@@ -342,7 +394,7 @@ def main() -> int:
                         src=rs["source_crest_db"]))
                 print(f"   {rs['verdict']['text']}")
             elif rs:
-                print(f"Residual: {rs['error']}")
+                print(t("cli.residual_error", args.lang, msg=rs["error"]))
             print(out)
         return 0
 
@@ -446,4 +498,4 @@ if __name__ == "__main__":
         finally:
             os._exit(0)
     except AudioError as e:
-        sys.exit(f"Fehler: {e}")
+        sys.exit(t("cli.error", None, msg=e))

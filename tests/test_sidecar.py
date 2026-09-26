@@ -118,3 +118,62 @@ class TestSchreibbarkeit:
     def test_neuer_ordner_wird_angelegt(self, tmp_path):
         ablage = SidecarStore(tmp_path / "a" / "b" / "c")
         assert ablage.enabled and (tmp_path / "a" / "b" / "c").is_dir()
+
+
+class TestAufraeumen:
+    """Einträge, die nie wieder gelten können, verschwinden auf Wunsch."""
+
+    def test_geloeschte_und_geaenderte_quellen(self, store, media, fullband):
+        import shutil
+
+        from app.sidecar import FREMD
+        ordner = media / "aufraeumen"
+        ordner.mkdir(exist_ok=True)
+        bleibt, weg, anders = (ordner / n for n in ("bleibt.flac", "weg.flac", "anders.flac"))
+        for f in (bleibt, weg, anders):
+            shutil.copy(fullband, f)
+            store.save("m", f.name, f, "q", {"n": 1})
+        store.save("fremd", "x.flac", fullband, "q", {"n": 1})
+        store.save("umbenannt", "y.flac", fullband, "q", {"n": 1})
+        weg.unlink()
+        anders.write_bytes(b"neuer Inhalt")
+
+        def quelle(root, rel):
+            if root == "m":
+                return ordner / rel
+            return FREMD if root == "fremd" else None
+
+        stand = store.prune(quelle)
+        assert stand == {"checked": 5, "removed": 3, "kept": 2}
+        assert store.load("m", "bleibt.flac", bleibt, "q") == {"n": 1}
+        assert store.load("fremd", "x.flac", fullband, "q") == {"n": 1}
+        shutil.rmtree(ordner)
+
+    def test_alte_analyseversion(self, store, fullband):
+        store.save("m", "v.flac", fullband, "q", {"n": 1})
+        core.ANALYSIS_VERSION += 1
+        try:
+            assert store.prune(lambda root, rel: fullband)["removed"] == 1
+        finally:
+            core.ANALYSIS_VERSION -= 1
+
+    def test_leere_ordner_verschwinden(self, store, fullband):
+        store.save("m", "tief/unten/z.flac", fullband, "q", {"n": 1})
+        store.clear()
+        assert list(store.base.iterdir()) == []
+
+
+class TestWurzelnamen:
+    def test_ordnerschluessel_der_oberflaeche_bleiben_lesbar(self, store):
+        """Sonst wäre nach dem Update jede vorhandene Ablage verwaist."""
+        assert store.path_for("vinyl-rips", "a.flac").parent.name == "vinyl-rips"
+
+    def test_absolute_pfade_kollidieren_nicht(self, store):
+        a = store.path_for("/srv/a b", "x.flac").parent.name
+        b = store.path_for("/srv/a_b", "x.flac").parent.name
+        assert a != b
+
+    def test_lange_pfade_bleiben_benennbar(self, store, fullband):
+        lang = "/" + "/".join(["verzeichnis"] * 40)
+        assert len(store.path_for(lang, "x.flac").parent.name) < 100
+        assert store.save(lang, "x.flac", fullband, "q", {"n": 1})

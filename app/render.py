@@ -47,13 +47,45 @@ def pick_ticks(scale: str, lo: float, hi: float) -> list:
     return [f for f in cands if lo <= f <= hi]
 
 
+# Aendert sich, wenn dieselben Daten anders gezeichnet werden. Gehoert in den
+# Cache-Schluessel der Bilder, nicht in die Analyseversion: die macht auch
+# die Ergebnisablage ungueltig, und dafuer gibt es hier keinen Grund.
+RENDER_VERSION = 2
+
+
 def remap(db: np.ndarray, sr: int, nfft: int, freqs: np.ndarray) -> np.ndarray:
-    """Interpoliert FFT-Bins linear auf die Ziel-Frequenzachse."""
+    """Bildet die FFT-Bins auf die Zeilen der Frequenzachse ab.
+
+    Deckt eine Zeile weniger als zwei Bins ab, wird linear interpoliert. Deckt
+    sie mehr ab - grosse FFT, obere Oktaven der log- und Mel-Achse -, zaehlt der
+    lauteste Bin darin. Mit reiner Interpolation fielen schmale Toene zwischen
+    zwei Stichproben durch: bei FFT 16384 und 550 Zeilen wurden 14 von 15 Bins
+    uebersprungen, ein Pfeifton war je nach Lage da oder weg. Die Zeitachse
+    wird beim Einlesen ebenso mit dem Maximum verdichtet.
+    """
     df = sr / nfft
     idx = np.clip(freqs / df, 0, db.shape[0] - 1.000001)
     i0 = idx.astype(int)
     frac = (idx - i0)[:, None].astype(np.float32)
-    return db[i0] * (1 - frac) + db[i0 + 1] * frac
+    out = db[i0] * (1 - frac) + db[i0 + 1] * frac
+    if idx.size < 2:
+        return out
+
+    # Grenzen der Zeilen in Bins: je halbe Strecke zum Nachbarn
+    mitte = (idx[:-1] + idx[1:]) / 2
+    unten = np.concatenate(([idx[0]], mitte))
+    oben = np.concatenate((mitte, [idx[-1]]))
+    breit = np.nonzero(oben - unten >= 2.0)[0]
+    if breit.size:
+        # Bins, deren Mitte in der Zeile liegt: [ceil(unten), ceil(oben)).
+        # reduceat nimmt die Paare als aufsteigende Grenzen; jedes zweite
+        # Ergebnis ist das Maximum einer Zeile. ceil(oben) bleibt dank der
+        # Klemmung oben kleiner als die Zahl der Bins.
+        grenzen = np.empty(2 * breit.size, dtype=np.intp)
+        grenzen[0::2] = np.ceil(unten[breit])
+        grenzen[1::2] = np.ceil(oben[breit])
+        out[breit] = np.maximum.reduceat(db, grenzen, axis=0)[0::2]
+    return out
 
 
 def resample_cols(db: np.ndarray, n: int) -> np.ndarray:

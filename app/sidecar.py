@@ -25,6 +25,10 @@ from . import core
 
 SAFE = re.compile(r"[^A-Za-z0-9._-]+")
 
+# Rueckgabe von quelle() in prune(): dieser Eintrag gehoert einem anderen
+# Werkzeug und bleibt unangetastet.
+FREMD = object()
+
 
 def _slug(text: str) -> str:
     """Dateinamenstauglicher Name, der den Ursprung noch erkennen laesst."""
@@ -54,10 +58,25 @@ class SidecarStore:
                 except OSError:
                     pass
 
+    @staticmethod
+    def _root_dir(root: str) -> str:
+        """Ordnername einer Wurzel.
+
+        Die Ordnerschluessel der Weboberflaeche bleiben unveraendert lesbar.
+        Absolute Pfade (Scans der Kommandozeile) bekommen eine Pruefsumme:
+        verschiedene Pfade koennen nach dem Bereinigen gleich aussehen, und
+        ein langer Pfad sprengte sonst die zulaessige Laenge eines Namens.
+        """
+        clean = SAFE.sub("_", root)
+        if "/" in root or os.sep in root or len(clean) > 80:
+            digest = hashlib.sha1(root.encode("utf-8")).hexdigest()[:10]
+            clean = f"{clean.strip('_')[-60:]}.{digest}"
+        return clean
+
     def path_for(self, root: str, rel: str) -> Path | None:
         if not self.enabled:
             return None
-        parent = self.base / SAFE.sub("_", root)
+        parent = self.base / self._root_dir(root)
         rel_dir = Path(rel).parent
         if str(rel_dir) not in (".", ""):
             parent = parent / SAFE.sub("_", str(rel_dir))[-120:]
@@ -132,4 +151,55 @@ class SidecarStore:
                 n += 1
             except OSError:
                 pass
+        self._leere_ordner_entfernen()
         return n
+
+    def prune(self, quelle) -> dict:
+        """Entfernt Eintraege, die nie wieder gelten koennen.
+
+        Das sind Eintraege zu geloeschten oder inzwischen geaenderten
+        Dateien, aus einer frueheren Analyseversion oder zu einer Wurzel, die
+        es nicht mehr gibt (umbenannter Medienordner). Ohne Aufraeumen wuchs
+        die Ablage mit jeder Umbenennung und jedem Update weiter.
+
+        quelle(root, rel) liefert die Datei zu einem Eintrag, None fuer eine
+        unbekannte Wurzel oder FREMD fuer Eintraege, die jemand anderem
+        gehoeren.
+        """
+        stand = {"checked": 0, "removed": 0, "kept": 0}
+        if not self.enabled:
+            return stand
+        for f in self.base.rglob("*.json"):
+            stand["checked"] += 1
+            try:
+                data = json.loads(f.read_text(encoding="utf-8"))
+                datei = quelle(data.get("root"), data.get("path") or "")
+                if datei is FREMD:
+                    stand["kept"] += 1
+                    continue
+                gueltig = (data.get("analysis_version") == core.ANALYSIS_VERSION
+                           and datei is not None)
+                if gueltig:
+                    st = datei.stat()
+                    gueltig = (data.get("mtime_ns") == st.st_mtime_ns
+                               and data.get("size") == st.st_size)
+            except (OSError, ValueError, AttributeError):
+                gueltig = False                 # unlesbar oder Quelle fehlt
+            if gueltig:
+                stand["kept"] += 1
+                continue
+            try:
+                f.unlink()
+                stand["removed"] += 1
+            except OSError:
+                stand["kept"] += 1
+        self._leere_ordner_entfernen()
+        return stand
+
+    def _leere_ordner_entfernen(self) -> None:
+        for ordner in sorted((d for d in self.base.rglob("*") if d.is_dir()),
+                             key=lambda d: len(d.parts), reverse=True):
+            try:
+                ordner.rmdir()
+            except OSError:
+                pass                            # nicht leer

@@ -9,6 +9,8 @@ Konfiguration ueber Umgebungsvariablen (siehe .env.example / docker-compose.yml)
     MAX_UPLOAD_MB   Groessenlimit je Upload
     CACHE_MAX_MB    Cache-Obergrenze, danach wird LRU-artig aufgeraeumt
     MAX_RENDERS     gleichzeitige Renderjobs
+    SCAN_JOBS       gleichzeitige Dateien aller laufenden Scans zusammen
+    MAX_STREAMS     gleichzeitige Wiedergaben (MP3-Ausschnitte)
     AUTH_USER/AUTH_PASS  optionale HTTP-Basic-Absicherung
     SHOW_ALL_FILES  1 = auch Dateien ohne bekannte Audio-Endung anzeigen
 """
@@ -19,8 +21,9 @@ import asyncio
 import base64
 import hashlib
 import io
-import logging
 import json
+import logging
+import math
 import os
 import re
 import secrets
@@ -30,7 +33,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import (FileResponse, HTMLResponse, Response,
                                StreamingResponse)
 from fastapi.staticfiles import StaticFiles
@@ -39,6 +42,13 @@ from . import core
 from .core import AudioError, Params
 from .i18n import LANGUAGES, khz as core_khz, normalise, set_current, t
 from .sidecar import SidecarStore
+
+try:                                     # python-multipart ab 0.0.13
+    from python_multipart.exceptions import FormParserError
+    from python_multipart.multipart import MultipartParser, parse_options_header
+except ImportError:                      # pragma: no cover - aeltere Fassungen
+    from multipart.exceptions import FormParserError
+    from multipart.multipart import MultipartParser, parse_options_header
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),
@@ -58,8 +68,49 @@ SIDECAR_ENABLED = os.environ.get("SIDECAR", "1") not in ("0", "", "false")
 DEFAULT_LANG = normalise(os.environ.get("LANG_DEFAULT", "de"))
 AUTH_USER = os.environ.get("AUTH_USER", "")
 AUTH_PASS = os.environ.get("AUTH_PASS", "")
+SCAN_JOBS = max(1, int(os.environ.get("SCAN_JOBS", str(MAX_RENDERS))))
+MAX_STREAMS = max(1, int(os.environ.get("MAX_STREAMS", str(max(4, 2 * MAX_RENDERS)))))
+MAX_UPLOAD_FILES = 50
 
-_sem = asyncio.Semaphore(MAX_RENDERS)
+# Die Anmeldung gilt, sobald einer der beiden Werte gesetzt ist. Vorher
+# schaltete ein vergessener AUTH_USER den Schutz still ab, obwohl ein
+# Passwort gesetzt war.
+AUTH_ENABLED = bool(AUTH_USER or AUTH_PASS)
+if AUTH_PASS and not AUTH_USER:
+    log.warning("AUTH_PASS ist gesetzt, AUTH_USER nicht - die Anmeldung erwartet "
+                "einen leeren Benutzernamen. AUTH_USER setzen.")
+elif AUTH_USER and not AUTH_PASS:
+    log.warning("AUTH_USER ist gesetzt, AUTH_PASS nicht - die Anmeldung erwartet "
+                "ein leeres Passwort. AUTH_PASS setzen.")
+
+# Interaktive Analysen, Scans und Wiedergaben haben je eine eigene Grenze.
+# Die Scan-Grenze gilt fuer alle Scans zusammen: vorher brachte jeder
+# weitere Scan (zweiter Tab, zweiter Nutzer) seine eigene mit und
+# vervielfachte die Zahl gleichzeitiger ffmpeg-Laeufe.
+class Grenze:
+    """Parallelitaetsgrenze, die zur laufenden Ereignisschleife gehoert.
+
+    Eine asyncio.Semaphore bindet sich an die erste Schleife, in der jemand
+    auf sie warten muss. Im Betrieb gibt es nur eine; Testclients starten
+    dagegen je Anfrage eine neue, und die gebundene Semaphore wuerfe dann.
+    Aufruf liefert die Semaphore selbst: ``async with _sem():``.
+    """
+
+    def __init__(self, n: int):
+        self.n = n
+        self._loop = None
+        self._sem: asyncio.Semaphore | None = None
+
+    def __call__(self) -> asyncio.Semaphore:
+        loop = asyncio.get_running_loop()
+        if self._loop is not loop or self._sem is None:
+            self._loop, self._sem = loop, asyncio.Semaphore(self.n)
+        return self._sem
+
+
+_sem = Grenze(MAX_RENDERS)
+_scan_sem = Grenze(SCAN_JOBS)
+_audio_sem = Grenze(MAX_STREAMS)
 
 
 # --------------------------------------------------------------------------
@@ -164,6 +215,31 @@ def is_audio(p: Path) -> bool:
     return SHOW_ALL_FILES or p.suffix.lower().lstrip(".") in core.AUDIO_EXT
 
 
+def inside(root_path: Path, p: Path) -> bool:
+    """Liegt ein Eintrag - auch ueber einen Symlink - im freigegebenen Ordner?
+
+    Dieselbe Regel wie in resolve(): Browser und Scan zeigen nur, was sich
+    danach auch oeffnen laesst. Vorher listete der Browser Symlinks nach
+    draussen, die dann mit 403 scheiterten, und der Scan analysierte sie.
+    Geprueft wird nur die letzte Pfadkomponente; der Ordner darueber ist
+    bereits aufgeloest.
+    """
+    if not p.is_symlink():
+        return True
+    try:
+        p.resolve().relative_to(root_path)
+    except (ValueError, OSError, RuntimeError):
+        return False
+    return True
+
+
+def finite(name: str, value: float | None) -> float | None:
+    """Weist NaN und Unendlich ab - FastAPI nimmt beides als Zahl an."""
+    if value is not None and not math.isfinite(value):
+        raise HTTPException(400, t("http.bad_value", name=name))
+    return value
+
+
 # --------------------------------------------------------------------------
 # Cache
 # --------------------------------------------------------------------------
@@ -173,7 +249,7 @@ def cache_key(kind: str, files: list, params: dict) -> str:
     for f in files:
         st = f.stat()
         ident.append([str(f), int(st.st_mtime), st.st_size])
-    blob = json.dumps([core.ANALYSIS_VERSION, kind, ident, params],
+    blob = json.dumps([core.ANALYSIS_VERSION, core.RENDER_VERSION, kind, ident, params],
                       sort_keys=True, default=str)
     return hashlib.sha1(blob.encode()).hexdigest()
 
@@ -185,8 +261,14 @@ DISPLAY_ONLY = frozenset({"cmap", "width", "height", "dpi", "theme", "raw",
                           "diff_range", "fmin", "fmax"})
 
 
-def analysis_params(p: Params) -> dict:
-    return {k: v for k, v in p.as_dict().items() if k not in DISPLAY_ONLY}
+# Fuer Messungen an einer einzelnen Datei zaehlt auch der Dynamikbereich
+# nicht - er bestimmt nur die Farbskala des Bildes.
+MESS_IGNORIERT = ("db_range", "db_top", "normalize")
+
+
+def analysis_params(p: Params, *ignoriert: str) -> dict:
+    return {k: v for k, v in p.as_dict().items()
+            if k not in DISPLAY_ONLY and k not in ignoriert}
 
 
 def write_atomic(path: Path, data: bytes) -> None:
@@ -233,13 +315,58 @@ def cache_put(key: str, data: bytes, boxes: list | None = None) -> Path:
     if boxes is not None:
         write_atomic(CACHE_DIR / f"{key}.json", json.dumps(boxes).encode())
     write_atomic(p, data)
-    prune_cache()
+    maybe_prune()
     return p
+
+
+_letztes_aufraeumen = 0.0
+
+
+def maybe_prune(force: bool = False) -> None:
+    """Raeumt hoechstens alle 30 s auf - jeder Durchlauf liest den ganzen
+    Cache-Ordner. Die Grenze ist damit weich: sie kann fuer einige Sekunden
+    um die zuletzt gerechneten Bilder ueberschritten sein."""
+    global _letztes_aufraeumen
+    jetzt = time.monotonic()
+    if force or jetzt - _letztes_aufraeumen >= 30:
+        _letztes_aufraeumen = jetzt
+        prune_cache()
 
 
 def _cache_entry(f: Path) -> bool:
     """Eintraege, die nach Groesse und Alter aufgeraeumt werden."""
-    return f.suffix in (".png", ".flac") or f.name.endswith(".stats.json")
+    return (f.suffix in (".png", ".flac")
+            or f.name.endswith((".stats.json", ".result.json")))
+
+
+# private: hinter der Anmeldung darf kein geteilter Proxy mitspeichern.
+# no-cache: der Browser fragt jedes Mal nach, ob sich etwas geaendert hat -
+# die Antwort 304 kostet nur ein stat(). Vorher hielt er ein Bild einen Tag
+# lang, auch wenn sich die Datei inzwischen geaendert hatte.
+BILD_CACHE = "private, no-cache"
+
+
+def png_headers(key: str, state: str, boxes_json: str) -> dict:
+    return {"X-Cache": state, "ETag": f'"{key}"', "Cache-Control": BILD_CACHE,
+            "X-Plot-Box": boxes_json}
+
+
+def not_modified(request: Request, key: str) -> Response | None:
+    """304, wenn der Browser genau dieses Bild schon hat.
+
+    Der Schluessel enthaelt Aenderungszeit und Groesse der Dateien, alle
+    Parameter und die Analyseversion - gleicher Schluessel heisst gleiches Bild.
+    """
+    angefragt = [e.strip() for e in request.headers.get("if-none-match", "").split(",")]
+    if f'"{key}"' not in angefragt:
+        return None
+    headers = {"ETag": f'"{key}"', "Cache-Control": BILD_CACHE}
+    meta = CACHE_DIR / f"{key}.json"
+    try:
+        headers["X-Plot-Box"] = meta.read_text()
+    except OSError:
+        pass                        # der Browser behaelt die gespeicherte Geometrie
+    return Response(status_code=304, headers=headers)
 
 
 def prune_cache() -> None:
@@ -296,7 +423,7 @@ async def sprache_setzen(request: Request, call_next):
 
 @app.middleware("http")
 async def basic_auth(request: Request, call_next):
-    if AUTH_USER and request.url.path != "/healthz":
+    if AUTH_ENABLED and request.url.path != "/healthz":
         hdr = request.headers.get("authorization", "")
         ok = False
         if hdr.startswith("Basic "):
@@ -317,9 +444,15 @@ def healthz():
     return {"ok": True, "roots": list(ROOTS), "ffmpeg": shutil.which("ffmpeg") or ""}
 
 
+INDEX_HTML = (BASE / "templates" / "index.html").read_text(encoding="utf-8")
+
+
 @app.get("/", response_class=HTMLResponse)
-def index():
-    return (BASE / "templates" / "index.html").read_text(encoding="utf-8")
+def index(request: Request):
+    """Die Seite kommt mit der Sprache, die der Server gewaehlt hat - sonst
+    entschied das Frontend allein nach navigator.language und ignorierte
+    LANG_DEFAULT."""
+    return INDEX_HTML.replace("__LANG__", lang_from(request))
 
 
 @app.get("/api/config")
@@ -353,7 +486,7 @@ def api_browse(root: str = "uploads", path: str = "", q: str = ""):
 
     needle = q.lower().strip()
     for e in entries:
-        if e.name.startswith("."):
+        if e.name.startswith(".") or not inside(r["path"], e):
             continue
         rel = str(e.relative_to(r["path"]))
         if e.is_dir():
@@ -421,9 +554,10 @@ def params_from_query(qp, lang: str = DEFAULT_LANG) -> Params:
         if v in (None, ""):
             return default
         try:
-            return cast(v)
+            wert = cast(v)
         except ValueError:
             raise HTTPException(400, t("http.bad_value", name=name)) from None
+        return finite(name, wert)
 
     try:
         return Params(
@@ -458,11 +592,12 @@ async def api_spectrogram(request: Request, root: str, path: str):
     f = resolve(root, path)
     p = params_from_query(request.query_params, lang_from(request))
     key = cache_key("spec", [f], p.as_dict())
+    if (antwort := not_modified(request, key)) is not None:
+        return antwort
     hit, boxes_json = cache_get(key)
     if hit:
-        return FileResponse(hit, media_type="image/png", headers={
-            "X-Cache": "hit", "Cache-Control": "public, max-age=86400",
-            "X-Plot-Box": boxes_json})
+        return FileResponse(hit, media_type="image/png",
+                            headers=png_headers(key, "hit", boxes_json))
 
     def work():
         a = core.analyse(str(f), p)
@@ -477,15 +612,14 @@ async def api_spectrogram(request: Request, root: str, path: str):
         boxes = core.render(panels, p, buf, title=f.name, subtitle=sub)
         return buf.getvalue(), boxes
 
-    async with _sem:
+    async with _sem():
         try:
             data, boxes = await asyncio.to_thread(work)
         except AudioError as e:
             raise HTTPException(422, clean_msg(e)) from e
-    cache_put(key, data, boxes)
-    return Response(data, media_type="image/png", headers={
-        "X-Cache": "miss", "Cache-Control": "public, max-age=86400",
-        "X-Plot-Box": json.dumps(boxes)})
+    await asyncio.to_thread(cache_put, key, data, boxes)
+    return Response(data, media_type="image/png",
+                    headers=png_headers(key, "miss", json.dumps(boxes)))
 
 
 @app.get("/api/compare.png")
@@ -495,10 +629,12 @@ async def api_compare_png(request: Request, a_root: str, a: str, b_root: str, b:
     align = request.query_params.get("align", "1") in ("1", "true")
     diff = request.query_params.get("diff", "1") in ("1", "true")
     key = cache_key("cmp", [fa, fb], {**p.as_dict(), "align": align, "diff": diff})
+    if (antwort := not_modified(request, key)) is not None:
+        return antwort
     hit, boxes_json = cache_get(key)
     if hit:
         return FileResponse(hit, media_type="image/png",
-                            headers={"X-Cache": "hit", "X-Plot-Box": boxes_json})
+                            headers=png_headers(key, "hit", boxes_json))
 
     def work():
         panels, stats = core.compare(str(fa), str(fb), p, align=align, show_diff=diff)
@@ -509,19 +645,19 @@ async def api_compare_png(request: Request, a_root: str, a: str, b_root: str, b:
                                          offset=stats["offset_s"]))
         return buf.getvalue(), boxes, stats
 
-    async with _sem:
+    async with _sem():
         try:
             data, boxes, stats = await asyncio.to_thread(work)
         except AudioError as e:
             raise HTTPException(422, clean_msg(e)) from e
-    cache_put(key, data, boxes)
+    await asyncio.to_thread(cache_put, key, data, boxes)
     try:
-        write_atomic(compare_stats_path(fa, fb, p, align),
-                     json.dumps(stats, default=str).encode())
+        await asyncio.to_thread(write_atomic, compare_stats_path(fa, fb, p, align),
+                                json.dumps(stats, default=str).encode())
     except OSError:
         pass
     return Response(data, media_type="image/png",
-                    headers={"X-Cache": "miss", "X-Plot-Box": json.dumps(boxes)})
+                    headers=png_headers(key, "miss", json.dumps(boxes)))
 
 
 @app.get("/api/compare.json")
@@ -546,34 +682,63 @@ async def api_compare_json(request: Request, a_root: str, a: str, b_root: str, b
         _, stats = core.compare(str(fa), str(fb), p, align=align, show_diff=False)
         return stats
 
-    async with _sem:
+    async with _sem():
         try:
             stats = await asyncio.to_thread(work)
         except AudioError as e:
             raise HTTPException(422, clean_msg(e)) from e
     try:
-        write_atomic(cached, json.dumps(stats, default=str).encode())
+        await asyncio.to_thread(write_atomic, cached,
+                                json.dumps(stats, default=str).encode())
     except OSError:
         pass
     return strip_paths(stats, names)
+
+
+async def measured(kind: str, files: list, p: Params, extra: dict, compute) -> dict:
+    """Rechnet eine Messung unter der Parallelitaetsgrenze und legt sie ab.
+
+    Der Schluessel enthaelt nur, was das Ergebnis beeinflusst: Dateien samt
+    Aenderungszeit, Analyseparameter, Sprache - keine Farbskala, keine
+    Bildgroesse. Die Oberflaeche laedt den Bericht nach jedem neuen Bild; ohne
+    Ablage dekodierte jede Aenderung der Darstellung die Datei fuenfmal.
+    """
+    key = cache_key(kind, files, {**analysis_params(p, *MESS_IGNORIERT), **extra})
+    ablage = CACHE_DIR / f"{key}.result.json"
+
+    def laden():
+        daten = json.loads(ablage.read_bytes())
+        os.utime(ablage, None)
+        return daten
+
+    try:
+        return await asyncio.to_thread(laden)
+    except (OSError, ValueError):
+        pass
+    async with _sem():
+        try:
+            res = await asyncio.to_thread(compute)
+        except AudioError as e:
+            raise HTTPException(422, clean_msg(e)) from e
+    try:
+        await asyncio.to_thread(write_atomic, ablage,
+                                json.dumps(res, default=str).encode())
+    except OSError:
+        pass
+    return res
 
 
 @app.get("/api/report")
 async def api_report(request: Request, root: str, path: str, loudness: int = 1):
     f = resolve(root, path)
     p = params_from_query(request.query_params, lang_from(request))
-
-    async with _sem:
-        try:
-            rep = await asyncio.to_thread(core.summary, str(f), p, bool(loudness))
-        except AudioError as e:
-            raise HTTPException(422, clean_msg(e)) from e
+    rep = await measured("report", [f], p, {"loudness": bool(loudness)},
+                         lambda: core.summary(str(f), p, bool(loudness)))
     return strip_paths(rep, {str(f): path})
 
 
 @app.get("/api/probe")
 async def api_probe(request: Request, root: str, path: str):
-    core.set_language(lang_from(request))
     f = resolve(root, path)
     try:
         info = await asyncio.to_thread(core.probe, str(f))
@@ -588,30 +753,35 @@ async def api_audio(root: str, path: str, start: float = 0.0,
     """Liefert den betrachteten Ausschnitt als MP3 - browserkompatibel fuer alle
     Quellformate (DSD, APE, TrueHD ...) und ermoeglicht Mithoeren beim Zoomen."""
     f = resolve(root, path)
+    finite("start", start)
+    finite("duration", duration)
     cmd = ["ffmpeg", "-v", "error", "-nostdin"]
-    if start:
-        cmd += ["-ss", f"{max(start, 0):.3f}"]
+    if start and start > 0:
+        cmd += ["-ss", f"{start:.3f}"]
     cmd += ["-i", str(f)]
     if duration:
         cmd += ["-t", f"{max(min(duration, 3600), 0.1):.3f}"]
     cmd += ["-map", "a:0", "-vn", "-ac", "2", "-b:a", "160k", "-f", "mp3", "-"]
 
-    proc = await asyncio.create_subprocess_exec(
-        *cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-
     async def gen():
-        try:
-            while True:
-                chunk = await proc.stdout.read(64 * 1024)
-                if not chunk:
-                    break
-                yield chunk
-        finally:
-            if proc.returncode is None:
-                proc.kill()
-            await proc.wait()
+        # Platz und Prozess erst hier: beginnt die Antwort nie (Abbruch vor
+        # dem ersten Byte), bleibt so nichts belegt und kein ffmpeg zurueck.
+        async with _audio_sem():
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            try:
+                while chunk := await proc.stdout.read(64 * 1024):
+                    yield chunk
+            finally:
+                if proc.returncode is None:
+                    proc.kill()
+                await proc.wait()
+                if proc.returncode not in (0, -9):
+                    log.warning("Wiedergabe von %s endete mit ffmpeg-Code %s",
+                                f.name, proc.returncode)
 
-    return StreamingResponse(gen(), media_type="audio/mpeg")
+    return StreamingResponse(gen(), media_type="audio/mpeg",
+                             headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/nulltest")
@@ -619,11 +789,8 @@ async def api_nulltest(request: Request, a_root: str, a: str, b_root: str, b: st
     """Sample-genaue Nullprobe zweier Dateien."""
     fa, fb = resolve(a_root, a), resolve(b_root, b)
     p = params_from_query(request.query_params, lang_from(request))
-    async with _sem:
-        try:
-            return await asyncio.to_thread(core.null_test, str(fa), str(fb), p)
-        except AudioError as e:
-            raise HTTPException(422, clean_msg(e)) from e
+    return await measured("null", [fa, fb], p, {},
+                          lambda: core.null_test(str(fa), str(fb), p))
 
 
 @app.get("/api/residual")
@@ -632,20 +799,19 @@ async def api_residual(request: Request, a_root: str, a: str, b_root: str, b: st
     """Differenz zweier Fassungen als hoerbare FLAC-Datei."""
     fa, fb = resolve(a_root, a), resolve(b_root, b)
     p = params_from_query(request.query_params, lang_from(request))
-    gain_db = max(-20.0, min(float(gain_db), 40.0))
-    key = cache_key("res", [fa, fb], {**p.as_dict(), "gain": gain_db})
+    gain_db = max(-20.0, min(finite("gain_db", gain_db), 40.0))
+    key = residual_key(fa, fb, p, gain_db)
     out = CACHE_DIR / f"{key}.flac"
     name = f"residual_{Path(a).stem}_minus_{Path(b).stem}.flac"
 
     if not out.exists():
-        async with _sem:
+        async with _sem():
             try:
                 await asyncio.to_thread(core.null_residual, str(fa), str(fb),
                                         str(out), p, 900.0, gain_db)
             except AudioError as e:
-                out.unlink(missing_ok=True)
                 raise HTTPException(422, clean_msg(e)) from e
-        prune_cache()
+        await asyncio.to_thread(maybe_prune, True)
     else:
         os.utime(out, None)
     return FileResponse(out, media_type="audio/flac", filename=name)
@@ -657,8 +823,8 @@ async def api_residual_json(request: Request, a_root: str, a: str,
     """Kennzahlen des Residuals, ohne die Datei zu uebertragen."""
     fa, fb = resolve(a_root, a), resolve(b_root, b)
     p = params_from_query(request.query_params, lang_from(request))
-    gain_db = max(-20.0, min(float(gain_db), 40.0))
-    key = cache_key("res", [fa, fb], {**p.as_dict(), "gain": gain_db})
+    gain_db = max(-20.0, min(finite("gain_db", gain_db), 40.0))
+    key = residual_key(fa, fb, p, gain_db)
     out = CACHE_DIR / f"{key}.flac"
     meta = CACHE_DIR / f"{key}.res.json"
     if meta.exists() and out.exists():
@@ -666,7 +832,7 @@ async def api_residual_json(request: Request, a_root: str, a: str,
             return json.loads(meta.read_text())
         except (OSError, ValueError):
             pass
-    async with _sem:
+    async with _sem():
         try:
             info = await asyncio.to_thread(core.null_residual, str(fa), str(fb),
                                            str(out), p, 900.0, gain_db)
@@ -674,11 +840,17 @@ async def api_residual_json(request: Request, a_root: str, a: str,
             raise HTTPException(422, clean_msg(e)) from e
     info["path"] = out.name
     try:
-        write_atomic(meta, json.dumps(info).encode())
+        await asyncio.to_thread(write_atomic, meta, json.dumps(info).encode())
     except OSError:
         pass
-    prune_cache()
+    await asyncio.to_thread(maybe_prune, True)
     return info
+
+
+def residual_key(fa: Path, fb: Path, p: Params, gain_db: float) -> str:
+    """Wie bei den Messungen: nur, was das Residual veraendert."""
+    return cache_key("res", [fa, fb],
+                     {**analysis_params(p, *MESS_IGNORIERT), "gain": gain_db})
 
 
 @app.get("/api/lowfreq")
@@ -686,11 +858,7 @@ async def api_lowfreq(request: Request, root: str, path: str):
     """Rumpeln, Plattenwelligkeit und Netzbrumm."""
     f = resolve(root, path)
     p = params_from_query(request.query_params, lang_from(request))
-    async with _sem:
-        try:
-            return await asyncio.to_thread(core.lowfreq_scan, str(f), p)
-        except AudioError as e:
-            raise HTTPException(422, clean_msg(e)) from e
+    return await measured("low", [f], p, {}, lambda: core.lowfreq_scan(str(f), p))
 
 
 @app.get("/api/wowflutter")
@@ -699,11 +867,10 @@ async def api_wowflutter(request: Request, root: str, path: str,
     """Drehzahlabweichung, Wow und Flutter an einem Messton."""
     f = resolve(root, path)
     p = params_from_query(request.query_params, lang_from(request))
-    async with _sem:
-        try:
-            return await asyncio.to_thread(core.wow_flutter, str(f), p, nominal_hz)
-        except AudioError as e:
-            raise HTTPException(422, clean_msg(e)) from e
+    if nominal_hz is not None and not (finite("nominal_hz", nominal_hz) > 0):
+        raise HTTPException(400, t("http.bad_value", name="nominal_hz"))
+    return await measured("wow", [f], p, {"nominal": nominal_hz},
+                          lambda: core.wow_flutter(str(f), p, nominal_hz))
 
 
 @app.get("/api/sweep")
@@ -712,11 +879,10 @@ async def api_sweep(request: Request, root: str, path: str,
     """Frequenzgang und Kanaltrennung aus einer Tonfolge."""
     f = resolve(root, path)
     p = params_from_query(request.query_params, lang_from(request))
-    async with _sem:
-        try:
-            return await asyncio.to_thread(core.tone_sweep, str(f), p, reference_hz)
-        except AudioError as e:
-            raise HTTPException(422, clean_msg(e)) from e
+    if not finite("reference_hz", reference_hz) > 0:
+        raise HTTPException(400, t("http.bad_value", name="reference_hz"))
+    return await measured("sweep", [f], p, {"reference": reference_hz},
+                          lambda: core.tone_sweep(str(f), p, reference_hz))
 
 
 @app.get("/api/clicks")
@@ -725,12 +891,9 @@ async def api_clicks(request: Request, root: str, path: str,
     """Sucht Knackser und andere Impulsstoerungen."""
     f = resolve(root, path)
     p = params_from_query(request.query_params, lang_from(request))
-    threshold_db = max(6.0, min(float(threshold_db), 40.0))
-    async with _sem:
-        try:
-            return await asyncio.to_thread(core.impulse_scan, str(f), p, threshold_db)
-        except AudioError as e:
-            raise HTTPException(422, clean_msg(e)) from e
+    threshold_db = max(6.0, min(finite("threshold_db", threshold_db), 40.0))
+    return await measured("clicks", [f], p, {"threshold": threshold_db},
+                          lambda: core.impulse_scan(str(f), p, threshold_db))
 
 
 def _scan_setup(root: str, path: str, recursive: int, limit: int,
@@ -744,26 +907,43 @@ def _scan_setup(root: str, path: str, recursive: int, limit: int,
         raise HTTPException(400, t("http.not_a_dir"))
 
     limit = max(1, min(limit, 2000))
-    seconds = max(5.0, min(float(seconds), 600.0))
-    it = base.rglob("*") if recursive else base.glob("*")
-    files = []
-    for f in sorted(it):
-        if len(files) >= limit:
-            break
-        if f.is_file() and not f.name.startswith(".") and is_audio(f):
-            files.append(f)
+    seconds = max(5.0, min(finite("seconds", seconds), 600.0))
+    files, truncated = audio_files(r["path"], base, bool(recursive), limit)
     sprache = normalise(lang or DEFAULT_LANG)
-    return r, files, seconds, limit, sprache, f"quickcheck:{int(seconds)}:{sprache}"
+    return (r, files, seconds, truncated, sprache,
+            f"quickcheck:{int(seconds)}:{sprache}")
+
+
+def audio_files(root_path: Path, base: Path, recursive: bool, limit: int):
+    """Audiodateien in fester Reihenfolge, hoechstens limit Stueck.
+
+    Liest nur so weit, wie es die Grenze verlangt - vorher wurde erst der
+    ganze Baum gelesen und sortiert, bevor das Limit griff. Versteckte
+    Ordner und Symlinks nach draussen bleiben aussen vor, wie im Browser.
+    """
+    out = []
+    for ordner, unter, namen in os.walk(base):
+        unter[:] = sorted(d for d in unter if not d.startswith(".")) if recursive else []
+        for name in sorted(namen):
+            if name.startswith("."):
+                continue
+            f = Path(ordner) / name
+            if not is_audio(f) or not inside(root_path, f) or not f.is_file():
+                continue
+            out.append(f)
+            if len(out) > limit:
+                return out[:limit], True
+    return out, False
 
 
 async def _scan_one(f: Path, r: dict, root: str, kind: str, seconds: float,
-                    sprache: str, refresh: int, sem: asyncio.Semaphore) -> dict:
+                    sprache: str, refresh: int) -> dict:
     rel = str(f.relative_to(r["path"]))
     if not refresh:
-        cached = SIDECARS.load(root, rel, f, kind)
+        cached = await asyncio.to_thread(SIDECARS.load, root, rel, f, kind)
         if cached is not None:
             return {**cached, "path": rel, "cached": True}
-    async with sem:
+    async with _scan_sem():
         try:
             res = await asyncio.to_thread(core.quickcheck, str(f),
                                           seconds, 4096, sprache)
@@ -783,18 +963,17 @@ async def api_scan(root: str, path: str = "", recursive: int = 1,
     Ergebnisse landen in der Sidecar-Ablage; beim naechsten Aufruf werden nur
     geaenderte Dateien neu gerechnet. Mit refresh=1 wird alles neu gemessen.
     """
-    r, files, seconds, limit, sprache, kind = _scan_setup(
-        root, path, recursive, limit, seconds, lang)
-    sem = asyncio.Semaphore(MAX_RENDERS)
+    r, files, seconds, truncated, sprache, kind = await asyncio.to_thread(
+        _scan_setup, root, path, recursive, limit, seconds, lang)
     results = await asyncio.gather(*[
-        _scan_one(f, r, root, kind, seconds, sprache, refresh, sem) for f in files])
+        _scan_one(f, r, root, kind, seconds, sprache, refresh) for f in files])
     gerechnet = sum(1 for x in results if not x.get("cached"))
     warn = sum(1 for x in results if (x.get("verdict") or {}).get("level") == "warn")
     return {"root": root, "path": path, "count": len(results),
             "warnings": warn, "computed": gerechnet,
             "from_index": len(results) - gerechnet,
             "index": SIDECARS.enabled,
-            "truncated": len(files) >= limit, "files": results}
+            "truncated": truncated, "files": results}
 
 
 @app.get("/api/scan/stream")
@@ -809,8 +988,8 @@ async def api_scan_stream(request: Request, root: str, path: str = "",
     vorliegt - der Fortschritt ist sichtbar und nichts laeuft in einen Timeout.
     Bricht der Browser ab, endet auch die Verarbeitung.
     """
-    r, files, seconds, limit, sprache, kind = _scan_setup(
-        root, path, recursive, limit, seconds, lang)
+    r, files, seconds, truncated, sprache, kind = await asyncio.to_thread(
+        _scan_setup, root, path, recursive, limit, seconds, lang)
 
     async def ereignisse():
         def paket(art: str, daten: dict) -> bytes:
@@ -818,10 +997,9 @@ async def api_scan_stream(request: Request, root: str, path: str = "",
 
         yield paket("start", {"total": len(files), "root": root, "path": path,
                               "index": SIDECARS.enabled,
-                              "truncated": len(files) >= limit})
-        sem = asyncio.Semaphore(MAX_RENDERS)
+                              "truncated": truncated})
         aufgaben = [asyncio.create_task(
-            _scan_one(f, r, root, kind, seconds, sprache, refresh, sem))
+            _scan_one(f, r, root, kind, seconds, sprache, refresh))
             for f in files]
         fertig = warn = gerechnet = 0
         try:
@@ -862,37 +1040,194 @@ def api_index_clear():
     return {"deleted": SIDECARS.clear()}
 
 
-@app.post("/api/upload")
-async def api_upload(files: list[UploadFile] = File(...)):
-    if len(files) > 50:
-        raise HTTPException(400, t("http.too_many_files", n=50))
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    saved, errors = [], []
-    limit = MAX_UPLOAD_MB * 1024 * 1024
-    for uf in files:
-        name = re.sub(r"[^\w.\- ()\[\]#&+,']", "_",
-                      os.path.basename(uf.filename or "datei")).strip()
-        if name in ("", ".", "..") or set(name) <= {"."}:
-            name = "upload"
-        dest = UPLOAD_DIR / name
-        i = 1
-        while dest.exists():
-            dest = UPLOAD_DIR / f"{Path(name).stem}_{i}{Path(name).suffix}"
-            i += 1
-        size = 0
+def index_quelle(root: str | None, rel: str):
+    """Datei zu einem Eintrag der Ergebnisablage - fuer das Aufraeumen."""
+    if root in ROOTS:
+        return ROOTS[root]["path"] / rel
+    if root and os.path.isabs(root):         # Scan der Kommandozeile
+        return Path(root) / rel
+    return None                              # umbenannte oder entfernte Wurzel
+
+
+@app.post("/api/index/prune")
+def api_index_prune():
+    """Entfernt Eintraege zu geloeschten, geaenderten oder nicht mehr
+    eingebundenen Dateien und aus frueheren Analyseversionen."""
+    return SIDECARS.prune(index_quelle)
+
+
+def upload_name(roh: str | None) -> str:
+    """Dateiname aus dem Upload, ohne Pfadanteile und ohne fuehrende Punkte.
+
+    Ein fuehrender Punkt machte die Datei unsichtbar: der Browser blendet
+    solche Namen aus, und "Uploads leeren" uebersprang sie.
+    """
+    name = os.path.basename((roh or "datei").replace("\\", "/"))
+    name = re.sub(r"[^\w.\- ()\[\]#&+,']", "_", name).strip().lstrip(".").strip()
+    return name or "upload"
+
+
+def reserve_upload(name: str) -> Path:
+    """Legt den Zielnamen exklusiv an - zwei gleichnamige Uploads zur selben
+    Zeit bekommen so sicher verschiedene Namen."""
+    stamm, endung = Path(name).stem, Path(name).suffix
+    i = 0
+    while True:
+        ziel = UPLOAD_DIR / (name if i == 0 else f"{stamm}_{i}{endung}")
         try:
-            with dest.open("wb") as out:
-                while chunk := await uf.read(1 << 20):
-                    size += len(chunk)
-                    if size > limit:
-                        raise ValueError(t("http.too_large", mb=MAX_UPLOAD_MB))
-                    out.write(chunk)
-            await asyncio.to_thread(core.probe, str(dest))
-            saved.append({"name": dest.name, "path": dest.name,
-                          "root": "uploads", "size": size})
-        except Exception as e:
-            dest.unlink(missing_ok=True)
-            errors.append({"name": name, "error": clean_msg(e)})
+            os.close(os.open(ziel, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644))
+            return ziel
+        except FileExistsError:
+            i += 1
+
+
+class _UploadTeil:
+    """Eine Datei im Upload-Strom: geschrieben wird in eine versteckte
+    Zwischendatei, erst nach bestandener Pruefung bekommt sie ihren Namen."""
+
+    PUFFER = 1 << 20
+
+    def __init__(self, name: str):
+        self.name = name
+        fd, tmp = tempfile.mkstemp(dir=UPLOAD_DIR, prefix=".upload-", suffix=".part")
+        self.tmp = Path(tmp)
+        self.fh = os.fdopen(fd, "wb")
+        self.puffer = bytearray()
+        self.size = 0
+        self.fehler: str | None = None
+
+    async def schreiben(self, daten: bytes, limit: float) -> None:
+        if self.fehler:
+            return
+        self.size += len(daten)
+        if self.size > limit:
+            self.fehler = t("http.too_large", mb=MAX_UPLOAD_MB)
+            await asyncio.to_thread(self.verwerfen)
+            return
+        self.puffer += daten
+        if len(self.puffer) >= self.PUFFER:
+            block, self.puffer = bytes(self.puffer), bytearray()
+            await asyncio.to_thread(self.fh.write, block)
+
+    def verwerfen(self) -> None:
+        try:
+            self.fh.close()
+        except OSError:
+            pass
+        self.tmp.unlink(missing_ok=True)
+
+    def abschliessen(self) -> dict:
+        """Laeuft im Thread: Rest schreiben, als Audio pruefen, benennen."""
+        try:
+            self.fh.write(self.puffer)
+            self.fh.close()
+            core.probe(str(self.tmp))
+            ziel = reserve_upload(self.name)
+            os.chmod(self.tmp, 0o644)
+            os.replace(self.tmp, ziel)
+            return {"name": ziel.name, "path": ziel.name, "root": "uploads",
+                    "size": self.size}
+        except Exception:
+            self.verwerfen()
+            raise
+
+
+@app.post("/api/upload", openapi_extra={"requestBody": {"required": True, "content": {
+    "multipart/form-data": {"schema": {"type": "object", "required": ["files"],
+                                       "properties": {"files": {
+                                           "type": "array",
+                                           "items": {"type": "string",
+                                                     "format": "binary"}}}}}}}})
+async def api_upload(request: Request):
+    """Nimmt Dateien entgegen und schreibt sie direkt in den Upload-Ordner.
+
+    Der Strom wird selbst zerlegt, statt ihn erst vollstaendig als
+    Zwischendatei anzunehmen: dort landete er im Container auf dem tmpfs, also
+    im Arbeitsspeicher, und das Groessenlimit griff erst, nachdem alles
+    angekommen war. Jetzt endet eine zu grosse Datei beim Ueberschreiten.
+    """
+    art, optionen = parse_options_header(request.headers.get("content-type", ""))
+    if art != b"multipart/form-data" or not optionen.get(b"boundary"):
+        raise HTTPException(400, t("http.no_multipart"))
+    limit = MAX_UPLOAD_MB * 1024 * 1024
+    laenge = request.headers.get("content-length", "")
+    if laenge.isdigit() and int(laenge) > limit * MAX_UPLOAD_FILES + (1 << 20):
+        raise HTTPException(413, t("http.too_large", mb=MAX_UPLOAD_MB))
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Die Zerlegung ruft synchron zurueck; die Ereignisse werden gesammelt und
+    # danach asynchron abgearbeitet, damit das Schreiben im Thread laufen kann.
+    ereignisse: list = []
+    kopf: dict = {"feld": b"", "wert": b"", "alle": {}}
+
+    def header_feld(data, start, end):
+        kopf["feld"] += data[start:end]
+
+    def header_wert(data, start, end):
+        kopf["wert"] += data[start:end]
+
+    def header_ende():
+        kopf["alle"][kopf["feld"].lower()] = kopf["wert"]
+        kopf["feld"] = kopf["wert"] = b""
+
+    def header_fertig():
+        ereignisse.append(("beginn", kopf["alle"]))
+        kopf["alle"] = {}
+
+    parser = MultipartParser(optionen[b"boundary"], {
+        "on_header_field": header_feld,
+        "on_header_value": header_wert,
+        "on_header_end": header_ende,
+        "on_headers_finished": header_fertig,
+        "on_part_data": lambda data, start, end: ereignisse.append(
+            ("daten", bytes(data[start:end]))),
+        "on_part_end": lambda: ereignisse.append(("ende", None)),
+    })
+
+    saved, errors = [], []
+    teil: _UploadTeil | None = None
+    anzahl = 0
+
+    async def abarbeiten():
+        nonlocal teil, anzahl
+        for art_, inhalt in ereignisse:
+            if art_ == "beginn":
+                _, disp = parse_options_header(inhalt.get(b"content-disposition", b""))
+                if b"filename" not in disp:
+                    teil = None                      # Formularfeld, keine Datei
+                    continue
+                anzahl += 1
+                name = upload_name(disp[b"filename"].decode("utf-8", "replace"))
+                if anzahl > MAX_UPLOAD_FILES:
+                    errors.append({"name": name, "error": t(
+                        "http.too_many_files", n=MAX_UPLOAD_FILES)})
+                    teil = None
+                    continue
+                teil = await asyncio.to_thread(_UploadTeil, name)
+            elif art_ == "daten" and teil is not None:
+                await teil.schreiben(inhalt, limit)
+            elif art_ == "ende" and teil is not None:
+                fertig, teil = teil, None
+                if fertig.fehler:
+                    errors.append({"name": fertig.name, "error": fertig.fehler})
+                    continue
+                try:
+                    saved.append(await asyncio.to_thread(fertig.abschliessen))
+                except Exception as e:
+                    errors.append({"name": fertig.name, "error": clean_msg(e)})
+        ereignisse.clear()
+
+    try:
+        async for chunk in request.stream():
+            parser.write(chunk)
+            await abarbeiten()
+        parser.finalize()
+        await abarbeiten()
+    except FormParserError as e:
+        raise HTTPException(400, t("http.bad_upload")) from e
+    finally:
+        if teil is not None:                   # Abbruch mitten in einer Datei
+            await asyncio.to_thread(teil.verwerfen)
     return {"saved": saved, "errors": errors}
 
 

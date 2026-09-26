@@ -35,6 +35,16 @@ def _smooth(db: np.ndarray, bins: int) -> np.ndarray:
     return np.convolve(db, np.ones(bins) / bins, mode="same")
 
 
+def _window_medians(x: np.ndarray, starts: np.ndarray, ends: np.ndarray) -> np.ndarray:
+    """Median von x[s:e] fuer viele Fenster - je Fensterlaenge ein Block."""
+    out = np.empty(starts.size)
+    laengen = ends - starts
+    for n in np.unique(laengen):
+        sel = np.nonzero(laengen == n)[0]
+        out[sel] = np.median(x[starts[sel, None] + np.arange(n)], axis=1)
+    return out
+
+
 def spectral_edge(med_db: np.ndarray, sr: int, nfft: int,
                   min_drop: float = 15.0, min_hz: float = 7000.0,
                   min_steepness: float = 10.0):
@@ -47,17 +57,24 @@ def spectral_edge(med_db: np.ndarray, sr: int, nfft: int,
     sm = _smooth(med_db, max(1, int(150 / df)))
     nyq = sr / 2
     lo_i, hi_i = max(int(min_hz / df), 4), int(0.995 * nyq / df)
-    best = None
-    for i in range(lo_i, hi_i):
-        f = i * df
-        b0, b1 = max(4, int((f - 1500) / df)), i
-        a0, a1 = int((f + 300) / df), int(min(f + 4000, nyq) / df)
-        if b1 - b0 < 3 or a1 - a0 < 3:
-            continue
-        drop = float(np.median(sm[b0:b1]) - np.median(sm[a0:a1]))
-        if best is None or drop > best[0]:
-            best = (drop, f, float(np.median(sm[a0:a1])))
-    if best is None or best[0] < min_drop:
+    # Fuer jede Kandidatenfrequenz: Median knapp darunter gegen Median
+    # darueber. Alle Kandidaten auf einmal, Fenster gleicher Laenge jeweils als
+    # ein Block - dieselben Werte wie Stelle fuer Stelle, aber ohne Tausende
+    # einzelner np.median-Aufrufe je Datei.
+    i = np.arange(lo_i, hi_i)
+    f = i * df
+    b0 = np.maximum(4, ((f - 1500) / df).astype(int))
+    a0 = ((f + 300) / df).astype(int)
+    a1 = (np.minimum(f + 4000, nyq) / df).astype(int)
+    gueltig = ((i - b0) >= 3) & ((a1 - a0) >= 3)
+    if not gueltig.any():
+        return None
+    unten = _window_medians(sm, b0[gueltig], i[gueltig])
+    oben = _window_medians(sm, a0[gueltig], a1[gueltig])
+    drops = unten - oben
+    k = int(np.argmax(drops))                  # erste Stelle des Maximums
+    best = (float(drops[k]), float(f[gueltig][k]), float(oben[k]))
+    if best[0] < min_drop:
         return None
 
     # Die Suche nach dem groessten Abstand zwischen "knapp darunter" und
