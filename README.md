@@ -264,7 +264,7 @@ CLI is still the better tool:
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                 # 233 tests, about 95 seconds
+pytest                 # 238 tests, about 95 seconds
 pytest --ignore=tests/test_browser.py   # without a browser, about 60 seconds
 ruff check app spectro.py tests
 ```

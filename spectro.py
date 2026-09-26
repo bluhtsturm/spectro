@@ -364,8 +364,10 @@ def main() -> int:
 
             a = core.analyse(path, p)
             panels = core.build_panels(a, p)
-            band = (core.band_analysis(a.mags[0], a.sr, p.nfft, a.info["codec"],
-                                       lang=args.lang) if args.cutoff else None)
+            # Dasselbe Urteil wie in Oberflaeche und --json: bei der
+            # Bezugsaufloesung, nicht bei der FFT-Groesse des Bildes
+            band = (core.band_report(path, p, a.mags[0], a.sr, a.info["codec"])
+                    if args.cutoff else None)
             cut = (band["edge_hz"] or band["signal_bandwidth_hz"]) if band else None
             sub = (f"{a.info['codec']} · {a.info['sample_rate']/1000:g} kHz · "
                    + t("plot.channels", args.lang, n=a.info["channels"])

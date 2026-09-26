@@ -108,6 +108,58 @@ class TestResidual:
         with pytest.raises(core.AudioError):
             core.null_residual(str(fullband), str(broken), str(tmp_path / "x.flac"))
 
+    def test_stereo_mit_versatz_und_pegel(self, tmp_path, stereo_paar):
+        a, b = stereo_paar
+        out = tmp_path / "st.flac"
+        r = core.null_residual(str(a), str(b), str(out))
+        assert r["channels"] == 2
+        assert abs(r["offset_ms"] + 20) < 0.1
+        assert abs(r["gain_db"] - 3.0) < 0.1
+        assert r["residual_db"] < -60
+        assert core.probe(str(out))["channels"] == 2
+
+    def test_speicher_bleibt_im_rahmen(self, tmp_path, stereo_paar):
+        """Beide Fassungen einmal als float32, alles Weitere blockweise.
+
+        Dazu kommt ein fester Anteil fuer die Kreuzkorrelation ueber hoechstens
+        30 s, unabhaengig von der Laenge. Vorher lagen beide Dateien, ihre
+        Summen und das Residual gleichzeitig in doppelter Genauigkeit vor: fuer
+        diese Minute 303 MB statt 137 MB, fuer fuenf Minuten in 96 kHz 3,1 GB.
+        """
+        import tracemalloc
+        a, b = stereo_paar
+        signal = 2 * 60 * 44100 * 2 * 4               # beide Dateien, float32
+        tracemalloc.start()
+        try:
+            core.null_residual(str(a), str(b), str(tmp_path / "m.flac"))
+            spitze = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+        assert spitze < signal + 128 * 2**20, (spitze / 2**20, signal / 2**20)
+
+    def test_residual_wird_erst_fertig_sichtbar(self, tmp_path, clicks, declicked):
+        """Keine Zwischendatei bleibt liegen, und nur die fertige Datei traegt
+        den endgueltigen Namen."""
+        out = tmp_path / "fertig.flac"
+        core.null_residual(str(clicks), str(declicked), str(out))
+        assert [f.name for f in tmp_path.iterdir()] == ["fertig.flac"]
+
+    def test_abbruch_laesst_die_alte_datei_stehen(self, tmp_path):
+        """Bricht das Schreiben ab, bleibt ein vorhandenes Ergebnis unberührt
+        und es liegt keine halbe Datei herum."""
+        from app import compare
+        out = tmp_path / "residual.flac"
+        out.write_bytes(b"altes Ergebnis")
+
+        def bloecke():
+            yield np.zeros(44100, dtype=np.float32).tobytes()
+            raise RuntimeError("Abbruch mitten im Schreiben")
+
+        with pytest.raises(RuntimeError):
+            compare._write_flac(str(out), 44100, 1, bloecke())
+        assert out.read_bytes() == b"altes Ergebnis"
+        assert [f.name for f in tmp_path.iterdir()] == ["residual.flac"]
+
 
 class TestRobustheit:
     def test_defekte_datei_endet_als_audioerror(self, broken):

@@ -264,7 +264,7 @@ nichts läuft in einen Timeout. Für einen unbeaufsichtigten ersten Durchlauf
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                 # 233 Tests, rund 95 Sekunden
+pytest                 # 238 Tests, rund 95 Sekunden
 pytest --ignore=tests/test_browser.py   # ohne Browser, rund 60 Sekunden
 ruff check app spectro.py tests
 ```

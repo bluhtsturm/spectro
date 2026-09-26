@@ -325,3 +325,21 @@ def broken(media) -> Path:
         p.write_bytes(b"fLaC" + bytes(np.random.default_rng(29)
                                       .integers(0, 256, 8000, dtype=np.uint8)))
     return p
+
+
+@pytest.fixture(scope="session")
+def stereo_paar(media) -> tuple[Path, Path]:
+    """Eine Minute Stereo und dieselbe Aufnahme 20 ms später und 3 dB leiser.
+
+    Lang genug, dass das Residual über mehrere Rechenblöcke läuft.
+    """
+    a = media / "stereo_a.flac"
+    b = media / "stereo_b.flac"
+    if not a.exists():
+        n = SR * 60
+        links = noise(n, seed=3) + tone(n, 440, amp=0.1)
+        rechts = noise(n, seed=4) + tone(n, 1000, amp=0.1)
+        write_pcm(a, np.stack([links, rechts], axis=1).ravel(), SR, channels=2)
+    if not b.exists():
+        ff(["-i", str(a), "-af", "adelay=20:all=1,volume=-3dB", str(b)])
+    return a, b

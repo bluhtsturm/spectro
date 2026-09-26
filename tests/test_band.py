@@ -203,6 +203,37 @@ class TestBezugsaufloesung:
         b = core.band_report(str(brickwall_20k), p, a.mags[0], a.sr, "flac")
         assert b["pattern"] == "konstant"
 
+    @pytest.mark.parametrize("abweichung", [{"channels": "left"}, {"overlap": 0.75}])
+    def test_anders_entstandenes_spektrum_wird_nicht_uebernommen(self, brickwall_20k,
+                                                                  abweichung):
+        """Nur ein Spektrum, das wie das eigene entstanden ist, darf das Urteil
+        tragen - sonst urteilte die Ansicht "links" allein über einen Kanal.
+
+        Als Köder dient ein flaches Spektrum ohne jede Kante: wird es
+        übernommen, verschwindet die Bandbegrenzung aus dem Urteil.
+        """
+        koeder = np.ones((core.REFERENCE_NFFT // 2 + 1, 200), dtype=np.float32)
+        passend = core.Params(nfft=core.REFERENCE_NFFT, overlap=0.5)
+        assert core.band_report(str(brickwall_20k), passend, koeder, 44100,
+                                "flac")["pattern"] == "voll"
+        p = core.Params(**{"nfft": core.REFERENCE_NFFT, "overlap": 0.5, **abweichung})
+        b = core.band_report(str(brickwall_20k), p, koeder, 44100, "flac")
+        assert b["pattern"] == "konstant", b["verdict"]["text"]
+
+
+class TestBandenergie:
+    @pytest.mark.parametrize("sr", [44100, 22050])
+    def test_anteile_ergeben_zusammen_eins(self, sr):
+        """Kein Frequenzbin darf in zwei Bändern zählen.
+
+        Bei 22,05 kHz liegt Nyquist unter der 16-kHz-Grenze; dort muss das
+        oberste Band trotzdem bis Nyquist reichen.
+        """
+        mag = np.random.default_rng(5).random((2049, 50)).astype(np.float32)
+        baender = core.band_energy(mag, sr, 4096)
+        assert abs(sum(b["share"] for b in baender) - 1.0) < 1e-9
+        assert baender[-1]["hi"] == sr / 2
+
 
 class TestVerlustfreieFormate:
     """ALAC, WavPack und Monkey's Audio müssen wie PCM behandelt werden.

@@ -126,6 +126,76 @@ class TestEndpunkte:
         d = client.get("/api/compare.json", params=p).json()
         assert "diff" in d and "offset_s" in d
 
+    def test_kennzahlen_haengen_nicht_an_der_darstellung(self, client, monkeypatch):
+        """Farbskala, Bildgröße, Differenzbereich und abgeschaltetes
+        Differenzbild ändern an den Kennzahlen nichts - sie dürfen keinen
+        zweiten Vergleich auslösen."""
+        from app import core
+        p = {"a_root": "musik", "a": "Alben/fullband.flac",
+             "b_root": "musik", "b": "Alben/lossy.mp3", "nfft": "1024"}
+        bild = client.get("/api/compare.png", params={
+            **p, "diff": "0", "diff_range": "12", "cmap": "viridis"})
+        assert bild.status_code == 200
+
+        def verboten(*args, **kwargs):
+            raise AssertionError("Vergleich wurde ein zweites Mal gerechnet")
+
+        monkeypatch.setattr(core, "compare", verboten)
+        r = client.get("/api/compare.json", params={
+            **p, "cmap": "gray", "width": "9", "height": "3", "fmax": "8000"})
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert "diff" in d
+        assert d["a"]["path"] == "Alben/fullband.flac"       # kein Serverpfad
+
+    def test_kennzahlen_ohne_bild_werden_abgelegt(self, client, monkeypatch):
+        from app import core
+        p = {"a_root": "musik", "a": "Alben/fullband.flac",
+             "b_root": "musik", "b": "Alben/lossy.mp3", "nfft": "512"}
+        erst = client.get("/api/compare.json", params=p)
+        assert erst.status_code == 200
+
+        def verboten(*args, **kwargs):
+            raise AssertionError("Vergleich wurde ein zweites Mal gerechnet")
+
+        monkeypatch.setattr(core, "compare", verboten)
+        assert client.get("/api/compare.json", params=p).json() == erst.json()
+
+    def test_cache_schreibt_ueber_eigene_zwischendateien(self, app_env, monkeypatch):
+        """Zwei Schreiber mit demselben Ziel teilen sich nie eine Zwischendatei."""
+        _, web, _ = app_env
+        namen = []
+        original = web.tempfile.mkstemp
+
+        def mitschreiben(*args, **kwargs):
+            fd, name = original(*args, **kwargs)
+            namen.append(name)
+            return fd, name
+
+        monkeypatch.setattr(web.tempfile, "mkstemp", mitschreiben)
+        ziel = web.CACHE_DIR / "atomar.stats.json"
+        web.write_atomic(ziel, b"1")
+        web.write_atomic(ziel, b"2")
+        assert len(set(namen)) == 2
+        assert ziel.read_bytes() == b"2"
+        assert not list(web.CACHE_DIR.glob("*.part"))
+        ziel.unlink()
+
+    def test_liegengebliebene_zwischendateien_werden_entfernt(self, app_env):
+        import os
+        import time
+        _, web, _ = app_env
+        alt = web.CACHE_DIR / "abc.png.x1.part"
+        frisch = web.CACHE_DIR / "def.png.x2.part"
+        for f in (alt, frisch):
+            f.write_bytes(b"x")
+        vorher = time.time() - 7200
+        os.utime(alt, (vorher, vorher))
+        web.prune_cache()
+        assert not alt.exists()
+        assert frisch.exists()
+        frisch.unlink()
+
     def test_stoerungssuche(self, client):
         r = client.get("/api/clicks",
                        params={"root": "musik", "path": "Alben/clicks.flac"})

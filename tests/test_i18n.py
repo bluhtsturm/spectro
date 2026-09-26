@@ -49,6 +49,24 @@ class TestOberflaeche:
         for lang in LANGUAGES:
             assert f"  {lang}: {{" in quelle, lang
 
+    def test_jeder_benutzte_schluessel_ist_uebersetzt(self):
+        """Ein fehlender Schlüssel erscheint sonst wörtlich auf dem Bildschirm
+        oder - wie beim CSV-Export - als Spaltenkopf "scan.col.path"."""
+        quelle = (STATIC / "i18n.js").read_text(encoding="utf-8")
+        de_teil, en_teil = quelle.split("  en: {", 1)
+
+        def schluessel(text):
+            return set(re.findall(r'"([\w.]+)":', text))
+
+        de, en = schluessel(de_teil), schluessel(en_teil)
+        assert de == en, sorted(de ^ en)
+
+        app = (STATIC / "app.js").read_text(encoding="utf-8")
+        benutzt = {k for k in re.findall(r'\bT\("([\w.]+)"', app) if not k.endswith(".")}
+        csv = re.search(r"const head2 = \[(.*?)\]", app, re.S).group(1)
+        benutzt |= {"scan.col." + k for k in re.findall(r'"(\w+)"', csv)}
+        assert benutzt <= de, sorted(benutzt - de)
+
     def test_keine_deutschen_texte_mehr_im_javascript(self):
         """Sichtbare Texte gehören in i18n.js, nicht in die Logik.
 

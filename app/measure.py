@@ -11,7 +11,7 @@ import numpy as np
 from .audio import _decode_mono, _decoder, _decoder_error, probe
 from .band import _smooth
 from .i18n import t
-from .params import EPS, AudioError, Params
+from .params import CHUNK_BYTES, EPS, AudioError, Params
 
 
 def lowfreq_scan(path: str, p: Params | None = None, max_seconds: float = 180.0) -> dict:
@@ -438,6 +438,54 @@ def tone_sweep(path: str, p: Params | None = None, reference_hz: float = 1000.0,
 # --------------------------------------------------------------------------
 
 
+def _impulse_envelopes(path: str, sr: int, start, duration, nfft: int, hop: int,
+                       hf_bins: tuple, lf_bins: int, max_seconds: float = 3600.0):
+    """Hoch- und Tieftonpegel je STFT-Rahmen, streamend berechnet.
+
+    Die Datei wird blockweise dekodiert und transformiert; im Speicher liegen
+    nur der aktuelle Block und die beiden Pegelverlaeufe (ein Wert je Rahmen).
+    Vorher entstand die STFT der ganzen Datei auf einmal - fuer eine
+    Plattenseite in hoher Abtastrate mehrere Gigabyte. Die Rahmen liegen an
+    denselben Stellen wie bei der Rechnung am Stueck, die Werte sind gleich.
+    """
+    dauer = min(float(duration or max_seconds), max_seconds)
+    proc = _decoder(path, sr, 1, start, dauer)
+    win = np.hanning(nfft).astype(np.float32)
+    hf_teile, lf_teile = [], []
+    buf = np.empty(0, dtype=np.float32)
+    tail = b""
+    total = 0
+    try:
+        while True:
+            chunk = proc.stdout.read(CHUNK_BYTES)
+            if not chunk:
+                break
+            chunk = tail + chunk
+            usable = len(chunk) - len(chunk) % 4
+            tail = chunk[usable:]
+            x = np.frombuffer(chunk[:usable], dtype=np.float32)
+            total += x.size
+            buf = np.concatenate((buf, x))
+            if buf.size < nfft:
+                continue
+            n = 1 + (buf.size - nfft) // hop
+            V = np.lib.stride_tricks.sliding_window_view(buf, nfft)[::hop][:n]
+            S = np.abs(np.fft.rfft(V * win, axis=1)).astype(np.float32) ** 2
+            hf_teile.append(10 * np.log10(S[:, hf_bins[0]:hf_bins[1]].sum(axis=1) + 1e-20))
+            lf_teile.append(10 * np.log10(S[:, :lf_bins].sum(axis=1) + 1e-20))
+            buf = buf[n * hop:].copy()
+    finally:
+        proc.stdout.close()
+        proc.wait()
+        err = _decoder_error(proc)
+    if not total and proc.returncode not in (0, None):
+        raise AudioError(f"ffmpeg: {err[:300]}")
+    leer = np.empty(0, dtype=np.float32)
+    hf = np.concatenate(hf_teile) if hf_teile else leer
+    lf = np.concatenate(lf_teile) if lf_teile else leer
+    return hf, lf, total
+
+
 def impulse_scan(path: str, p: Params | None = None, threshold_db: float = 14.0,
                  max_ms: float = 6.0, lf_margin: float = 6.0,
                  max_events: int = 300) -> dict:
@@ -451,24 +499,18 @@ def impulse_scan(path: str, p: Params | None = None, threshold_db: float = 14.0,
     p = (p or Params()).validate()
     info = probe(path)
     sr = int(p.sr or info["sample_rate"])
-    x = _decode_mono(path, sr, p.start, p.duration, max_seconds=3600.0)
     nfft, hop = 256, 64
-    if x.size < nfft * 16:
-        raise AudioError(t("err.too_short_imp", p.lang))
-
-    win = np.hanning(nfft).astype(np.float32)
-    n = 1 + (x.size - nfft) // hop
-    V = np.lib.stride_tricks.sliding_window_view(x, nfft)[::hop][:n]
-    S = np.abs(np.fft.rfft(V * win, axis=1)).astype(np.float32) ** 2
     df = sr / nfft
 
     # Oberhalb der Bandkante steht bei hochgesampeltem Material nur Rauschen,
     # deshalb das Hochtonband bei 20 kHz bzw. der halben Nyquistrate kappen.
     hi0 = int(6000 / df)
-    hi1 = int(min(0.45 * sr, 20000) / df) if sr > 50000 else S.shape[1]
+    hi1 = int(min(0.45 * sr, 20000) / df) if sr > 50000 else nfft // 2 + 1
     hi1 = max(hi0 + 2, hi1)
-    hf = 10 * np.log10(S[:, hi0:hi1].sum(axis=1) + 1e-20)
-    lf = 10 * np.log10(S[:, :max(2, int(1000 / df))].sum(axis=1) + 1e-20)
+    hf, lf, samples = _impulse_envelopes(path, sr, p.start, p.duration, nfft, hop,
+                                         (hi0, hi1), max(2, int(1000 / df)))
+    if samples < nfft * 16:
+        raise AudioError(t("err.too_short_imp", p.lang))
 
     # Untergrund als Blockmedian (0,5 s) mit linearer Verbindung - schnell
     # und unempfindlich gegen die Stoerungen selbst
@@ -485,25 +527,29 @@ def impulse_scan(path: str, p: Params | None = None, threshold_db: float = 14.0,
     max_frames = max(1, int(max_ms / frame_ms))
     t0 = float(p.start or 0.0)
 
+    # Ein Ereignis beginnt, wo die Huellkurve die Schwelle erreicht, und endet
+    # am ersten Rahmen, der wieder unter die halbe Schwelle faellt. Nur die
+    # Kandidaten werden besucht, nicht jeder Rahmen - bei einer Stunde in
+    # 96 kHz sind das sonst fuenf Millionen Schleifendurchlaeufe.
+    starts = np.flatnonzero(over_h >= threshold_db)
+    ruhig = np.flatnonzero(over_h <= threshold_db / 2)
     events = []
-    i = 0
-    while i < over_h.size:
-        if over_h[i] < threshold_db:
-            i += 1
+    naechster = 0
+    for i in starts:
+        if i < naechster:
             continue
-        j = i
-        while j < over_h.size and over_h[j] > threshold_db / 2:
-            j += 1
+        k = int(np.searchsorted(ruhig, i))
+        j = int(ruhig[k]) if k < ruhig.size else over_h.size
         width = j - i
         peak = float(over_h[i:j].max())
         lf_peak = float(over_l[i:j].max())
         if width <= max_frames and peak - lf_peak >= lf_margin:
-            events.append({"t": round(t0 + i * hop / sr, 3),
+            events.append({"t": round(t0 + int(i) * hop / sr, 3),
                            "db": round(peak, 1),
                            "ms": round(width * frame_ms, 2)})
-        i = j + 1
+        naechster = j + 1
 
-    dur = x.size / sr
+    dur = samples / sr
     per_min = len(events) / (dur / 60) if dur > 0 else 0.0
     strong = [e for e in events if e["db"] >= 25]
 

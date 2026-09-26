@@ -877,7 +877,7 @@ function drawScan() {
   $("scan-csv").onclick = () => {
     const head2 = ["name", "path", "codec", "rate", "channels", "bitrate",
                    "duration", "edge", "pattern", "verdict", "note"]
-      .map((k) => T("scan.col." + k, {}) || k);
+      .map((k) => T("scan.col." + k));
     const csvq = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const lines = [head2.join(";")].concat(rows.map((f) => [
       f.name, f.path, f.codec, f.sample_rate, f.channels, f.bit_rate,

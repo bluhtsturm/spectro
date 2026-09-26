@@ -26,6 +26,8 @@ import re
 import secrets
 import shutil
 import subprocess
+import tempfile
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
@@ -176,6 +178,35 @@ def cache_key(kind: str, files: list, params: dict) -> str:
     return hashlib.sha1(blob.encode()).hexdigest()
 
 
+# Nur fuer die Darstellung - an den Messwerten aendern sie nichts. Stuenden
+# sie im Schluessel der Kennzahlen, rechnete jede Aenderung an Farbskala,
+# Bildgroesse oder Differenzbereich den ganzen Vergleich ein zweites Mal.
+DISPLAY_ONLY = frozenset({"cmap", "width", "height", "dpi", "theme", "raw",
+                          "diff_range", "fmin", "fmax"})
+
+
+def analysis_params(p: Params) -> dict:
+    return {k: v for k, v in p.as_dict().items() if k not in DISPLAY_ONLY}
+
+
+def write_atomic(path: Path, data: bytes) -> None:
+    """Schreibt ueber eine eigene Zwischendatei und benennt dann um.
+
+    Jeder Schreiber bekommt einen eigenen Namen: teilten sich zwei
+    gleichzeitige Anfragen mit demselben Schluessel eine Zwischendatei,
+    landete ein Gemisch aus beiden im Cache.
+    """
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".",
+                               suffix=".part")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+
+
 def cache_get(key: str):
     p = CACHE_DIR / f"{key}.png"
     if not p.exists():
@@ -189,32 +220,51 @@ def stats_path(key: str) -> Path:
     return CACHE_DIR / f"{key}.stats.json"
 
 
+def compare_stats_path(fa: Path, fb: Path, p: Params, align: bool) -> Path:
+    """Ablage der Vergleichskennzahlen - unabhaengig von der Darstellung."""
+    return stats_path(cache_key("cmpstats", [fa, fb],
+                                {**analysis_params(p), "align": align}))
+
+
 def cache_put(key: str, data: bytes, boxes: list | None = None) -> Path:
     p = CACHE_DIR / f"{key}.png"
-    tmp = p.with_suffix(".tmp")
-    tmp.write_bytes(data)
-    tmp.replace(p)
+    # Geometrie zuerst: wer das Bild schon sieht, soll auch die Plotflaechen
+    # finden, sonst funktioniert der Zoom auf diesem Treffer nicht
     if boxes is not None:
-        (CACHE_DIR / f"{key}.json").write_text(json.dumps(boxes))
+        write_atomic(CACHE_DIR / f"{key}.json", json.dumps(boxes).encode())
+    write_atomic(p, data)
     prune_cache()
     return p
+
+
+def _cache_entry(f: Path) -> bool:
+    """Eintraege, die nach Groesse und Alter aufgeraeumt werden."""
+    return f.suffix in (".png", ".flac") or f.name.endswith(".stats.json")
 
 
 def prune_cache() -> None:
     """Raeumt den Cache nach Gesamtgroesse auf - inklusive der Residual-Dateien.
 
     Zaehlte man nur die PNGs, wuechse der Ordner durch die deutlich groesseren
-    FLAC-Residuen unbegrenzt weiter.
+    FLAC-Residuen unbegrenzt weiter. Zwischendateien, die ein Abbruch liegen
+    gelassen hat, verschwinden nach einer Stunde.
     """
     limit = CACHE_MAX_MB * 1024 * 1024
+    stale = time.time() - 3600
     entries = []
     total = 0
     for f in CACHE_DIR.iterdir():
-        if not f.is_file() or f.suffix not in (".png", ".flac"):
-            continue
         try:
+            if not f.is_file():
+                continue
             st = f.stat()
         except OSError:
+            continue
+        if f.suffix == ".part":
+            if st.st_mtime < stale:
+                f.unlink(missing_ok=True)
+            continue
+        if not _cache_entry(f):
             continue
         entries.append((st.st_atime, f, st.st_size))
         total += st.st_size
@@ -223,10 +273,10 @@ def prune_cache() -> None:
         if total <= limit:
             break
         total -= size
-        stem = str(f)[:-len(f.suffix)]
         f.unlink(missing_ok=True)
+        key = f.name.split(".", 1)[0]
         for extra in (".json", ".stats.json", ".res.json"):
-            Path(stem + extra).unlink(missing_ok=True)
+            (CACHE_DIR / f"{key}{extra}").unlink(missing_ok=True)
 
 
 # --------------------------------------------------------------------------
@@ -466,7 +516,8 @@ async def api_compare_png(request: Request, a_root: str, a: str, b_root: str, b:
             raise HTTPException(422, clean_msg(e)) from e
     cache_put(key, data, boxes)
     try:
-        stats_path(key).write_text(json.dumps(stats, default=str))
+        write_atomic(compare_stats_path(fa, fb, p, align),
+                     json.dumps(stats, default=str).encode())
     except OSError:
         pass
     return Response(data, media_type="image/png",
@@ -482,16 +533,17 @@ async def api_compare_json(request: Request, a_root: str, a: str, b_root: str, b
     # Das Bild hat die Kennzahlen in aller Regel schon berechnet - erneutes
     # Rechnen wuerde jede Vergleichsansicht doppelt so teuer machen.
     names = {str(fa): a, str(fb): b}
-    cached = stats_path(cache_key("cmp", [fa, fb],
-                                 {**p.as_dict(), "align": align, "diff": True}))
+    cached = compare_stats_path(fa, fb, p, align)
     if cached.exists():
         try:
-            return strip_paths(json.loads(cached.read_text()), names)
+            stats = json.loads(cached.read_text())
+            os.utime(cached, None)
+            return strip_paths(stats, names)
         except (OSError, ValueError):
             pass
 
     def work():
-        _, stats = core.compare(str(fa), str(fb), p, align=align, show_diff=True)
+        _, stats = core.compare(str(fa), str(fb), p, align=align, show_diff=False)
         return stats
 
     async with _sem:
@@ -499,6 +551,10 @@ async def api_compare_json(request: Request, a_root: str, a: str, b_root: str, b
             stats = await asyncio.to_thread(work)
         except AudioError as e:
             raise HTTPException(422, clean_msg(e)) from e
+    try:
+        write_atomic(cached, json.dumps(stats, default=str).encode())
+    except OSError:
+        pass
     return strip_paths(stats, names)
 
 
@@ -618,9 +674,10 @@ async def api_residual_json(request: Request, a_root: str, a: str,
             raise HTTPException(422, clean_msg(e)) from e
     info["path"] = out.name
     try:
-        meta.write_text(json.dumps(info))
+        write_atomic(meta, json.dumps(info).encode())
     except OSError:
         pass
+    prune_cache()
     return info
 
 
