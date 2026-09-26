@@ -1,134 +1,134 @@
 # Changelog
 
-Alle nennenswerten Änderungen. Das Format folgt lose
-[Keep a Changelog](https://keepachangelog.com/de/1.1.0/), die Versionierung
-[SemVer](https://semver.org/lang/de/).
+*[Deutsche Fassung](CHANGELOG.de.md)*
 
-Die Analyseversion (`ANALYSIS_VERSION` in `app/core.py`) wird erhöht, sobald
-sich Messung oder Bewertung ändern. Cache und Ergebnisablage werden dadurch
-ungültig, damit nach einem Update keine alten Bewertungen ausgeliefert werden.
+All notable changes. The format loosely follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning follows
+[SemVer](https://semver.org/).
+
+The analysis version (`ANALYSIS_VERSION` in `app/core.py`) goes up whenever a
+measurement or a verdict changes. That invalidates cache and result index, so
+that no stale verdicts are served after an update.
 
 ## [Unreleased]
 
-Analyseversion unverändert (12): Scan-Ergebnisse und die Bewertung einzelner
-Dateien bleiben gleich, die Ergebnisablage der Oberfläche muss nicht neu
-gerechnet werden. Der Bild-Cache wird einmal neu gefüllt (neue
-`RENDER_VERSION`). Scans der Kommandozeile legen ihre Ergebnisse jetzt unter
-dem Scan-Ordner ab statt unter `cli` und rechnen deshalb einmal neu;
-`--prune` räumt die alten Einträge weg.
+Analysis version unchanged (12): scan results and the verdicts on individual
+files stay the same, the result index of the interface does not need to be
+recomputed. The image cache is refilled once (new `RENDER_VERSION`). Command
+line scans now file their results under the scanned folder instead of under
+`cli` and therefore compute once more; `--prune` removes the old entries.
 
-### Behoben
+### Fixed
 
-- `--cutoff` auf der Kommandozeile urteilte bei der FFT-Größe des Bildes
-  (Standard 2048) statt bei der Bezugsauflösung 4096 und konnte deshalb
-  anders ausfallen als Oberfläche und `--json`
-- Das Bandurteil übernahm ein vorhandenes Spektrum auch dann, wenn es aus
-  einem einzelnen Kanal oder mit anderer Überlappung entstanden war
-- Die Kennzahlen eines Vergleichs wurden neu gerechnet, sobald sich nur die
-  Darstellung änderte (Differenzbereich, Differenzbild aus, Farbskala,
-  Bildgröße); sie liegen jetzt unabhängig davon im Cache
-- Residual und Cache-Dateien werden über eine eigene Zwischendatei
-  geschrieben: ein Abbruch oder zwei gleichzeitige Anfragen hinterlassen keine
-  halbe Datei mehr, die danach als gültig ausgeliefert würde
-- Die Energieverteilung zählte die Grenzfrequenzen doppelt, die Anteile
-  ergaben zusammen etwas mehr als 100 %
-- Der CSV-Export der Oberfläche hatte zwei unübersetzte Spaltenköpfe
-- `numpy>=2.0` als Mindestversion: die Gleichlaufmessung nutzt
-  `np.trapezoid`, das es vorher nicht gab
-- Uploads werden beim Empfang geprüft und direkt in den Upload-Ordner
-  geschrieben. Vorher landete jede Datei erst vollständig auf dem tmpfs des
-  Containers – also im Arbeitsspeicher –, bevor das Größenlimit griff
-- Upload-Namen mit führendem Punkt waren unsichtbar und ließen sich über die
-  Oberfläche nicht löschen; gleichnamige Uploads zur selben Zeit konnten sich
-  überschreiben
-- Ein gesetztes `AUTH_PASS` ohne `AUTH_USER` schaltete die Anmeldung still ab
-- Bilder wurden als `public` einen Tag lang gecacht: hinter der Anmeldung
-  durften Proxys sie speichern, und eine geänderte Datei blieb im Browser alt.
-  Jetzt `private` mit `ETag`, der Browser fragt nach und bekommt 304
-- Symlinks aus einem Medienordner heraus erschienen im Browser (und scheiterten
-  beim Öffnen) und wurden vom Scan analysiert; jetzt gilt überall dieselbe Regel
-- NaN und Unendlich als Parameter endeten als Serverfehler statt als 400
-- Jeder Scan brachte seine eigene Parallelitätsgrenze mit, die Wiedergabe gar
-  keine: zwei Scans und ein paar Wiedergaben vervielfachten die ffmpeg-Läufe
-- Die Oberfläche richtete ihre Sprache allein nach dem Browser und ignorierte
-  `LANG_DEFAULT`; jetzt entscheidet der Server wie für die Bewertungen
-- Fehler beim Löschen von Uploads wurden in der Oberfläche verschluckt
-- Meldungen der Parameterprüfung und einige Fehler aus dem Kern waren nur
-  deutsch; Hilfe und Ausgaben der Kommandozeile ebenso
-- Der Scan der Kommandozeile brach bei einem unerwarteten Fehler in einer
-  einzelnen Datei komplett ab, und verschiedene Scan-Ordner teilten sich in der
-  Ergebnisablage einen Schlüssel
+- `--cutoff` on the command line judged at the FFT size of the image (default
+  2048) instead of the reference resolution 4096 and could therefore differ
+  from the interface and from `--json`
+- The band verdict reused an existing spectrum even when it came from a single
+  channel or a different overlap
+- The metrics of a comparison were recomputed as soon as only the display
+  changed (difference range, difference view off, colour map, image size); they
+  are now cached independently of it
+- Residual and cache files are written through a temporary file of their own:
+  an interruption or two simultaneous requests no longer leave a half-written
+  file that would afterwards be served as valid
+- The energy distribution counted the boundary frequencies twice, the shares
+  added up to slightly more than 100 %
+- The CSV export of the interface had two untranslated column headers
+- `numpy>=2.0` as the minimum version: the speed stability measurement uses
+  `np.trapezoid`, which did not exist before
+- Uploads are checked while they arrive and written straight into the upload
+  folder. Before, every file first landed completely on the container's tmpfs –
+  that is, in memory – before the size limit applied
+- Upload names with a leading dot were invisible and could not be deleted from
+  the interface; uploads of the same name at the same time could overwrite each
+  other
+- Setting `AUTH_PASS` without `AUTH_USER` silently disabled authentication
+- Images were cached as `public` for a day: behind the login, proxies were
+  allowed to store them, and a changed file stayed stale in the browser. Now
+  `private` with an `ETag`; the browser revalidates and gets a 304
+- Symlinks leading out of a media folder showed up in the browser (and failed
+  when opened) and were analysed by the scan; the same rule now applies
+  everywhere
+- NaN and infinity as parameters ended as a server error instead of a 400
+- Every scan brought its own concurrency limit, playback had none at all: two
+  scans and a few playbacks multiplied the number of ffmpeg processes
+- The interface picked its language from the browser alone and ignored
+  `LANG_DEFAULT`; now the server decides, as it does for the verdicts
+- Errors when deleting uploads were swallowed by the interface
+- Messages of the parameter check and some errors from the core were German
+  only; so were the help and output of the command line
+- The command line scan aborted completely on an unexpected error in a single
+  file, and different scan folders shared one key in the result index
 
-### Geändert
+### Changed
 
-- Die Störungssuche arbeitet streamend: zehn Minuten in 44,1 kHz brauchen
-  31 MB statt 2,5 GB und sind siebenmal so schnell
-- Das Residual rechnet blockweise: fünf Minuten 96 kHz Stereo brauchen 630 MB
-  statt 3,1 GB. Die Länge ist wie dokumentiert auf `max_seconds` begrenzt,
-  auch wenn eine längere `duration` angefragt wird
-- Bildzeilen, die mehrere FFT-Bins abdecken, zeigen den lautesten davon statt
-  einer Stichprobe. Bei FFT 16384 fielen vorher 14 von 15 Bins durch, ein
-  schmaler Ton war je nach Lage sichtbar oder nicht. Rauschen wirkt bei großer
-  FFT dafür etwas heller; die Standardansicht (FFT 2048, linear) ist unverändert
-- Die Bandkantensuche rechnet vektorisiert: dasselbe Ergebnis, dreimal so
-  schnell – der Sammlungs-Scan wird dadurch spürbar schneller
-- Bericht, Nullprobe, Störungssuche, Tiefton, Gleichlauf und Frequenzgang
-  landen im Cache, mit einem Schlüssel nur aus den Parametern, die das Ergebnis
-  ändern. Vorher dekodierte jede Änderung der Farbskala die Datei fünfmal neu
-- Dateizugriffe des Scans, der Ablage und des Caches laufen außerhalb der
-  Ereignisschleife; der Cache wird höchstens alle 30 Sekunden aufgeräumt
-- Die Scan-Grenze gilt über alle Scans gemeinsam (`SCAN_JOBS`), die Wiedergabe
-  hat eine eigene (`MAX_STREAMS`)
-- Image und CI installieren feste Fassungen aus `requirements-lock.txt`;
-  Dependabot hält sie, die Actions und das Basis-Image aktuell.
+- The impulse scan streams: ten minutes at 44.1 kHz need 31 MB instead of
+  2.5 GB and run seven times as fast
+- The residual is computed block by block: five minutes of 96 kHz stereo need
+  630 MB instead of 3.1 GB. As documented, its length is capped at
+  `max_seconds`, even if a longer `duration` is requested
+- Image rows that cover several FFT bins show the loudest of them instead of a
+  sample. At FFT 16384, 14 of 15 bins used to fall through the gaps, and a
+  narrow tone was visible or not depending on where it sat. In return, noise
+  looks somewhat brighter at large FFT sizes; the default view (FFT 2048,
+  linear) is unchanged
+- The band edge search is vectorised: same result, three times as fast – which
+  noticeably speeds up the collection scan
+- Report, null test, impulse scan, low end, speed stability and frequency
+  response are cached, keyed only by the parameters that change the result.
+  Before, every change of the colour map decoded the file five more times
+- File access of the scan, the result index and the cache runs outside the
+  event loop; the cache is pruned at most every 30 seconds
+- The scan limit applies across all scans together (`SCAN_JOBS`), playback has
+  its own (`MAX_STREAMS`)
+- Image and CI install pinned versions from `requirements-lock.txt`;
+  Dependabot keeps them, the actions and the base image up to date.
   `python-multipart>=0.0.18`
 
-### Neu
+### Added
 
-- A/B-Umschalten beim Hören im Vergleich (Knopf oder Taste `X`): es geht an
-  derselben musikalischen Stelle weiter, mit Versatzausgleich – sample-genau,
-  sobald die Nullprobe gelaufen ist
-- Anhebung des Residuals in dB direkt in der Oberfläche
-- Upload-Fortschritt je Datei; die Oberfläche lädt Dateien einzeln hoch
-- Ergebnisablage aufräumen: `POST /api/index/prune` und `--prune` entfernen
-  Einträge zu gelöschten, geänderten oder nicht mehr eingebundenen Dateien und
-  aus älteren Analyseversionen
-- `--jobs` für den Scan der Kommandozeile (Standard: halbe CPU-Zahl)
+- A/B switching while listening in comparison mode (button or key `X`):
+  playback continues at the same musical spot with the time offset compensated
+  – sample-accurately once the null test has run
+- Residual boost in dB directly in the interface
+- Upload progress per file; the interface uploads files one at a time
+- Result index cleanup: `POST /api/index/prune` and `--prune` remove entries
+  of deleted, changed or no longer mounted files and of older analysis versions
+- `--jobs` for the command line scan (default: half the CPU count)
 
-## [1.0.0] – 12.09.2026
+## [1.0.0] – 2026-09-12
 
-Erste Fassung. Analyseversion 12.
+First release. Analysis version 12.
 
-### Enthalten
+### Included
 
-- Spektrogramme mit linearer, logarithmischer und Mel-Achse, Zoom in Zeit und
-  Frequenz, Wiedergabe des sichtbaren Ausschnitts
-- Bandkanten-Analyse mit Steilheitsprüfung, Erkennung hochgesampelter Dateien
-  über den Stoppbandbeginn
-- Vergleich A/B mit Differenzbild, automatischem Versatzausgleich, Nullprobe
-  und hörbarem Residual samt Zerlegung
-- Störungssuche mit Bassgegenprobe, Tieftonanalyse (Rumpeln, Netzbrumm),
-  Dauerton-Erkennung
-- Messwerte nach EBU R128, echte Bittiefe, Stereo-Kennzahlen
-- Gleichlaufmessung an einem Messton: Drehzahlabweichung, Wow und Flutter
-- Sammlungs-Scan mit Ergebnisablage und Ereignisstrom, CSV-Export
-- Weboberfläche, HTTP-API und Kommandozeilenwerkzeug, deutsch und englisch
-- Upload-Verwaltung: auswählen und sammelweise löschen, auch über die CLI
-- 226 Tests, alle Prüfsignale werden mit ffmpeg erzeugt, darunter zwölf
-  Oberflächentests im echten Browser
+- Spectrograms with linear, logarithmic and mel frequency axis, zoom in time and
+  frequency, playback of the visible section
+- Band edge analysis with steepness check, detection of upsampled files by the
+  start of the stopband
+- A/B comparison with difference view, automatic offset compensation, null test
+  and audible residual including its breakdown
+- Impulse scan with bass counter-check, low end analysis (rumble, mains hum),
+  steady tone detection
+- Measurements according to EBU R128, real bit depth, stereo metrics
+- Speed stability from a test tone: speed deviation, wow and flutter
+- Collection scan with result index and event stream, CSV export
+- Web interface, HTTP API and command line tool, in German and English
+- Upload management: select and delete in bulk, also from the CLI
+- 226 tests, every test signal generated with ffmpeg, twelve of them interface
+  tests in a real browser
 
-### An echtem Material kalibriert
+### Calibrated on real material
 
-Die Schwellen stammen aus Messungen an Rips von Schallplatte und Tonband, an
-Leerlaufmitschnitten der Aufnahmekette und an zwei Encoder-Leitern aus je zehn
-Fassungen zweier Quellen. CALIBRATION.md dokumentiert jede Zahl samt der
-Fehlschlüsse, die dahinterstecken.
+The thresholds come from measurements on record and tape rips, idle recordings
+of the capture chain and two encoder ladders of ten versions each from two
+sources. [CALIBRATION.md](CALIBRATION.md) documents every number together with
+the false conclusions behind it.
 
-### Bekannte Grenzen
+### Known limits
 
-- Verlustbehaftete Quellen ohne Encoder-Tiefpass lassen sich am Spektrum nicht
-  nachweisen. Über zwei Leitern wurden acht bzw. neun von zehn Fassungen
-  erkannt. AAC 256 begrenzt bei 96,9 % der Nyquist-Frequenz und ist dort nicht
-  vom Antialiasing-Filter eines Wandlers zu unterscheiden (CALIBRATION.md,
-  Abschnitte 2 und 11)
-- Die Schwellen sind an einer überschaubaren Zahl echter Aufnahmen kalibriert
+- Lossy sources without an encoder lowpass cannot be proven from the spectrum.
+  Across two ladders, eight and nine of ten versions were detected. AAC 256
+  band-limits at 96.9 % of the Nyquist frequency, where it cannot be told apart
+  from a converter's anti-aliasing filter (CALIBRATION.md, sections 2 and 11)
+- The thresholds are calibrated on a limited number of real recordings

@@ -16,4 +16,5 @@ pytest.ini
 requirements-dev.txt
 CALIBRATION.de.md
 CHANGELOG.md
+CHANGELOG.de.md
 README.de.md
