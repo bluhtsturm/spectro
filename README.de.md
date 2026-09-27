@@ -304,7 +304,7 @@ fünf Minuten 96 kHz Stereo rund 630 MB) und rechnet den Rest blockweise.
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
-pytest                 # 311 Tests, rund 110 Sekunden
+pytest                 # 312 Tests, rund 110 Sekunden
 pytest --ignore=tests/test_browser.py   # ohne Browser, rund 80 Sekunden
 ruff check app spectro.py tests
 ```

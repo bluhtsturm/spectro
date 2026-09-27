@@ -660,6 +660,10 @@ audio.addEventListener("ended", () => { $("play").textContent = T("player.play")
 async function loadReport(compare) {
   const rep = $("report");
   rep.innerHTML = `<div class="card"><h3>${esc(T("card.file"))}</h3><div class="hint">${esc(T("card.measuring"))}</div></div>`;
+  // Ersetzt wird nur der Platzhalter: Karten, die inzwischen dazugekommen
+  // sind (Störungssuche, Nullprobe ...), bleiben stehen. Ist er schon weg,
+  // hat ein neueres Bild übernommen und diese Antwort ist veraltet.
+  const platz = rep.firstElementChild;
   try {
     if (compare) {
       const q = new URLSearchParams(params());
@@ -667,27 +671,21 @@ async function loadReport(compare) {
       q.set("b_root", state.b.root); q.set("b", state.b.path);
       q.set("align", $("align").checked ? "1" : "0");
       const st = await jget("/api/compare.json?" + q);
+      if (!platz.isConnected) return;
       // Versatz fürs A/B-Hören; die Nullprobe liefert ihn später sample-genau
       if (!state.versatzGenau) state.versatz = st.offset_s || 0;
-      rep.innerHTML = "";
-      rep.appendChild(cmpCard("A", st.a));
-      rep.appendChild(cmpCard("B", st.b));
-      rep.appendChild(diffCard(st));
+      platz.replaceWith(cmpCard("A", st.a), cmpCard("B", st.b), diffCard(st));
     } else {
       const q = new URLSearchParams(params());
       q.set("root", state.a.root); q.set("path", state.a.path);
       const r = await jget("/api/report?" + q);
-      rep.innerHTML = "";
-      rep.appendChild(fileCard(r));
-      rep.appendChild(loudCard(r));
-      rep.appendChild(bandCard(r));
-      const lc = lowCard(r);
-      if (lc) rep.appendChild(lc);
-      const tc = toneCard(r);
-      if (tc) rep.appendChild(tc);
+      if (!platz.isConnected) return;
+      platz.replaceWith(...[fileCard(r), loudCard(r), bandCard(r),
+        lowCard(r), toneCard(r)].filter(Boolean));
     }
   } catch (e) {
-    rep.innerHTML = `<div class="card"><h3>${esc(T("card.error"))}</h3><div class="hint">${esc(e.message)}</div></div>`;
+    if (!platz.isConnected) return;
+    platz.outerHTML = `<div class="card"><h3>${esc(T("card.error"))}</h3><div class="hint">${esc(e.message)}</div></div>`;
   }
 }
 

@@ -45,6 +45,11 @@ that no stale verdicts are served after an update.
 
 - Sentences on the release page broke in the middle, because GitHub shows
   every line break of the changelog there
+- A result card vanished again when the report arrived after it: whoever
+  started the impulse scan, null test, residual, speed stability or frequency
+  response measurement while the report was still being computed lost that
+  result. The report now only replaces its own placeholder, and a report for
+  an image that has since been replaced is dropped
 
 ## [1.1.0] – 2026-09-26
 
