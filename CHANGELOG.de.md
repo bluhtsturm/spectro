@@ -47,6 +47,11 @@ ungültig, damit nach einem Update keine alten Bewertungen ausgeliefert werden.
 
 - Auf der Release-Seite brachen Sätze mitten in der Zeile um, weil GitHub dort
   jeden Zeilenumbruch des Changelogs anzeigt
+- Eine Ergebniskarte verschwand wieder, wenn der Bericht erst nach ihr ankam:
+  wer Störungssuche, Nullprobe, Residual, Gleichlauf oder Frequenzgang
+  startete, während der Bericht noch rechnete, verlor dieses Ergebnis. Der
+  Bericht ersetzt jetzt nur seinen eigenen Platzhalter, und ein Bericht zu
+  einem inzwischen ersetzten Bild wird verworfen
 
 ## [1.1.0] – 26.09.2026
 

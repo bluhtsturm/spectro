@@ -297,7 +297,7 @@ of 96 kHz stereo about 630 MB) and computes the rest block by block.
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
-pytest                 # 311 tests, about 110 seconds
+pytest                 # 312 tests, about 110 seconds
 pytest --ignore=tests/test_browser.py   # without a browser, about 80 seconds
 ruff check app spectro.py tests
 ```

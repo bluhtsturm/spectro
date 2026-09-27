@@ -204,6 +204,24 @@ class TestBedienung:
         seite.page.wait_for_selector("#clickcard", timeout=90000)
         assert seite.page.locator("#events button").count() >= 1
 
+    def test_spaeter_bericht_loescht_keine_karten(self, seite):
+        """Kommt der Bericht erst nach der Störungssuche an, bleibt ihre Karte
+        stehen – vorher leerte er den ganzen Berichtsbereich."""
+        gehalten = []
+        seite.page.route("**/api/report?*", lambda route: gehalten.append(route))
+        seite.datei_waehlen("clicks")
+        seite.warte_auf_bild()
+        seite.page.click("#clicks")
+        seite.page.wait_for_selector("#clickcard", timeout=90000)
+        assert gehalten, "Bericht wurde nicht abgefangen"
+        for route in gehalten:
+            route.continue_()
+        seite.page.wait_for_function(
+            "() => { const c = document.querySelector('#report .card');"
+            " return c && c.id !== 'clickcard' && c.querySelector('.kv'); }",
+            timeout=90000)
+        assert seite.page.locator("#clickcard").count() == 1
+
 
 class TestSprache:
     def test_englische_oberflaeche(self, browser, dienst):
