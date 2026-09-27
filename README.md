@@ -338,6 +338,10 @@ Tagging `v1.2.3` builds a multi-architecture image (amd64 and arm64),
 publishes it to `ghcr.io` and then creates the GitHub release page from the
 matching section of both changelogs – English on top, German below. For an
 older tag the page can be created by hand with the *Release-Seite* workflow.
+Pull requests that change the *Release* workflow, the Dockerfile or the pinned
+versions run the same build as a probe without publishing and start both
+images – the arm64 one emulated with QEMU. Started by hand, *Release* is a
+probe as well.
 [CHANGELOG.md](CHANGELOG.md) records what changed;
 `ANALYSIS_VERSION` in `app/core.py` goes up whenever a measurement or a verdict
 changes, which invalidates cache and result index so that no stale verdicts
