@@ -1,0 +1,8 @@
+# Untergrenzen der Laufzeit-Abhaengigkeiten. Die festgelegten Fassungen
+# stehen in requirements.txt und werden daraus erzeugt:
+#   pip-compile --strip-extras --output-file=requirements.txt requirements.in
+fastapi>=0.110
+uvicorn[standard]>=0.27
+python-multipart>=0.0.18
+numpy>=2.0
+matplotlib>=3.7

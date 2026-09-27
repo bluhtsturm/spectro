@@ -32,6 +32,32 @@ def abschnitt(datei: Path, version: str) -> str:
     return treffer.group(1).strip()
 
 
+def entbrechen(text: str) -> str:
+    """Fuegt hart umbrochene Absaetze und Listenpunkte zu je einer Zeile.
+
+    Die CHANGELOGs sind nach etwa 80 Zeichen umbrochen. Auf einer
+    Release-Seite zeigt GitHub jeden Zeilenumbruch an, die Saetze brachen
+    dort also mitten im Satz um.
+    """
+    zeilen: list[str] = []
+    im_code = False
+    for zeile in text.split("\n"):
+        roh = zeile.strip()
+        if roh.startswith("```"):
+            im_code = not im_code
+            zeilen.append(zeile)
+            continue
+        neuer_block = (not roh or im_code
+                       or roh.startswith(("#", "- ", "* ", "|", ">", "<"))
+                       or re.match(r"\d+\. ", roh))
+        vorher = zeilen[-1].strip() if zeilen else ""
+        if neuer_block or not vorher or vorher.startswith(("#", "```", "|", "<")):
+            zeilen.append(zeile)
+        else:
+            zeilen[-1] = zeilen[-1].rstrip() + " " + roh
+    return "\n".join(zeilen)
+
+
 def notes(tag: str, wurzel: Path = WURZEL,
           repo: str = os.environ.get("GITHUB_REPOSITORY", "bluhtsturm/spectro")) -> str:
     passt = TAG.fullmatch(tag)
@@ -42,8 +68,8 @@ def notes(tag: str, wurzel: Path = WURZEL,
         return RELATIV.sub(
             lambda m: f"](https://github.com/{repo}/blob/{tag}/{m.group(1)})", text)
 
-    englisch = fest(abschnitt(wurzel / "CHANGELOG.md", version))
-    deutsch = fest(abschnitt(wurzel / "CHANGELOG.de.md", version))
+    englisch = fest(entbrechen(abschnitt(wurzel / "CHANGELOG.md", version)))
+    deutsch = fest(entbrechen(abschnitt(wurzel / "CHANGELOG.de.md", version)))
     return (f"{englisch}\n\n"
             f"```bash\ndocker pull ghcr.io/{repo.lower()}:{version}\n```\n\n"
             f"<details>\n<summary>Deutsch</summary>\n\n{deutsch}\n\n</details>\n")

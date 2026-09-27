@@ -18,6 +18,28 @@ that no stale verdicts are served after an update.
   section of both changelogs (English on top, German below). The
   *Release-Seite* workflow creates it by hand for older tags
 
+### Changed
+
+- Pinned versions now come from pip-compile: `requirements.in` and
+  `requirements-dev.in` state the lower bounds, `requirements.txt` and
+  `requirements-dev.txt` hold the resolved versions and replace
+  `requirements-lock.txt`. Dependabot resolves the whole set on every update,
+  so packages that depend on each other stay in step – its first update had
+  raised `pydantic-core` without `pydantic` and could not be installed
+- Test and lint tools are pinned as well; a new pytest or ruff release no
+  longer changes CI on its own
+- numpy 2.5.3 and contourpy 1.4.0; every measurement gives the same result as
+  before
+- GitHub Actions on their Node 24 versions: `setup-python` 7,
+  `setup-buildx-action` 4, `login-action` 4, `metadata-action` 6,
+  `build-push-action` 7. Dependabot now bundles action updates into one pull
+  request
+
+### Fixed
+
+- Sentences on the release page broke in the middle, because GitHub shows
+  every line break of the changelog there
+
 ## [1.1.0] – 2026-09-26
 
 Analysis version unchanged (12): scan results and the verdicts on individual

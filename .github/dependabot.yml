@@ -1,11 +1,17 @@
-# Haelt requirements-lock.txt, die Actions und das Basis-Image aktuell.
+# Haelt die festgelegten Fassungen, die Actions und das Basis-Image aktuell.
 # Jede Aktualisierung kommt als Pull Request und laeuft durch die volle CI.
 version: 2
 updates:
+  # requirements.txt und requirements-dev.txt entstehen mit pip-compile aus den
+  # .in-Dateien. Dependabot erkennt das an der Kopfzeile und loest beim
+  # Aktualisieren neu auf - so bleiben voneinander abhaengige Pakete wie
+  # pydantic und pydantic-core zueinander passend. Die Untergrenzen in den
+  # .in-Dateien bleiben stehen, solange die neue Fassung sie erfuellt.
   - package-ecosystem: pip
     directory: /
     schedule:
       interval: weekly
+    versioning-strategy: increase-if-necessary
     groups:
       python:
         patterns: ["*"]
@@ -13,6 +19,9 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
   - package-ecosystem: docker
     directory: /
     schedule:

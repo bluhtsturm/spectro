@@ -303,8 +303,8 @@ fünf Minuten 96 kHz Stereo rund 630 MB) und rechnet den Rest blockweise.
 ## Mitarbeit
 
 ```bash
-pip install -r requirements-dev.txt
-pytest                 # 300 Tests, rund 110 Sekunden
+pip install -r requirements.txt -r requirements-dev.txt
+pytest                 # 311 Tests, rund 110 Sekunden
 pytest --ignore=tests/test_browser.py   # ohne Browser, rund 80 Sekunden
 ruff check app spectro.py tests
 ```
@@ -352,9 +352,19 @@ Tag lässt sie sich über den Workflow *Release-Seite* von Hand anlegen.
 ändern – Cache und Ergebnisablage werden dadurch ungültig, damit kein alter
 Befund ein Update überlebt.
 
-Image und CI installieren die in `requirements-lock.txt` festgelegten Fassungen;
-`requirements.txt` nennt nur die Untergrenzen. Dependabot schlägt Aktualisierungen
-der Fassungen, der Actions und des Basis-Images als Pull Request vor.
+Image und CI installieren festgelegte Fassungen. `requirements.in` und
+`requirements-dev.in` nennen die Untergrenzen; `requirements.txt` und
+`requirements-dev.txt` entstehen daraus mit pip-compile unter Python 3.12, der
+Fassung des Images:
+
+```bash
+pip-compile --strip-extras --output-file=requirements.txt requirements.in
+pip-compile --strip-extras --output-file=requirements-dev.txt requirements-dev.in
+```
+
+Dependabot schlägt Aktualisierungen der Fassungen, der Actions und des
+Basis-Images als Pull Request vor; für die Fassungen führt es pip-compile erneut
+aus, voneinander abhängige Pakete steigen also gemeinsam.
 
 ## Lizenz
 
