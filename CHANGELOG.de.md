@@ -10,20 +10,21 @@ Die Analyseversion (`ANALYSIS_VERSION` in `app/core.py`) wird erhöht, sobald
 sich Messung oder Bewertung ändern. Cache und Ergebnisablage werden dadurch
 ungültig, damit nach einem Update keine alten Bewertungen ausgeliefert werden.
 
-## [Unreleased]
+## [1.1.1] – 27.09.2026
 
-### Neu
+Analyseversion (12) und `RENDER_VERSION` (2) unverändert: Scan-Ergebnisse,
+Ergebnisablage und Bild-Cache bleiben gültig, nach dem Update wird nichts
+neu gerechnet.
 
-- Jeder Tag legt auch seine Release-Seite auf GitHub an, aus dem passenden
-  Abschnitt beider Changelogs (Englisch oben, Deutsch darunter). Für ältere
-  Tags legt der Workflow *Release-Seite* sie von Hand an
-- Probe der Veröffentlichung: Pull Requests, die den Workflow *Release*, das
-  Dockerfile oder die festgelegten Fassungen ändern, bauen das Image für amd64
-  und arm64 ohne es zu veröffentlichen und starten beide – arm64 emuliert mit
-  QEMU. Bisher wurde das arm64-Image nie gestartet, und ein kaputter Bau fiel
-  erst beim nächsten Tag auf. Von Hand gestartet ist *Release* jetzt ebenfalls
-  eine Probe; vorher veröffentlichte es den aktuellen Stand von main als
-  `latest`
+### Behoben
+
+- Eine Ergebniskarte verschwand wieder, wenn der Bericht erst nach ihr ankam:
+  wer Störungssuche, Nullprobe, Residual, Gleichlauf oder Frequenzgang
+  startete, während der Bericht noch rechnete, verlor dieses Ergebnis. Der
+  Bericht ersetzt jetzt nur seinen eigenen Platzhalter, und ein Bericht zu
+  einem inzwischen ersetzten Bild wird verworfen
+- Auf der Release-Seite brachen Sätze mitten in der Zeile um, weil GitHub dort
+  jeden Zeilenumbruch des Changelogs anzeigt
 
 ### Geändert
 
@@ -43,15 +44,18 @@ ungültig, damit nach einem Update keine alten Bewertungen ausgeliefert werden.
   `login-action` 4, `metadata-action` 6, `build-push-action` 7. Dependabot
   fasst Actions-Aktualisierungen jetzt in einem Pull Request zusammen
 
-### Behoben
+### Neu
 
-- Auf der Release-Seite brachen Sätze mitten in der Zeile um, weil GitHub dort
-  jeden Zeilenumbruch des Changelogs anzeigt
-- Eine Ergebniskarte verschwand wieder, wenn der Bericht erst nach ihr ankam:
-  wer Störungssuche, Nullprobe, Residual, Gleichlauf oder Frequenzgang
-  startete, während der Bericht noch rechnete, verlor dieses Ergebnis. Der
-  Bericht ersetzt jetzt nur seinen eigenen Platzhalter, und ein Bericht zu
-  einem inzwischen ersetzten Bild wird verworfen
+- Jeder Tag legt auch seine Release-Seite auf GitHub an, aus dem passenden
+  Abschnitt beider Changelogs (Englisch oben, Deutsch darunter). Für ältere
+  Tags legt der Workflow *Release-Seite* sie von Hand an
+- Probe der Veröffentlichung: Pull Requests, die den Workflow *Release*, das
+  Dockerfile oder die festgelegten Fassungen ändern, bauen das Image für amd64
+  und arm64 ohne es zu veröffentlichen und starten beide – arm64 emuliert mit
+  QEMU. Bisher wurde das arm64-Image nie gestartet, und ein kaputter Bau fiel
+  erst beim nächsten Tag auf. Von Hand gestartet ist *Release* jetzt ebenfalls
+  eine Probe; vorher veröffentlichte es den aktuellen Stand von main als
+  `latest`
 
 ## [1.1.0] – 26.09.2026
 
