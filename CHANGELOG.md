@@ -10,19 +10,21 @@ The analysis version (`ANALYSIS_VERSION` in `app/core.py`) goes up whenever a
 measurement or a verdict changes. That invalidates cache and result index, so
 that no stale verdicts are served after an update.
 
-## [Unreleased]
+## [1.1.1] – 2026-09-27
 
-### Added
+Analysis version (12) and `RENDER_VERSION` (2) unchanged: scan results,
+the result index and the image cache stay valid, nothing is recomputed
+after the update.
 
-- Every tag also creates its GitHub release page, taken from the matching
-  section of both changelogs (English on top, German below). The
-  *Release-Seite* workflow creates it by hand for older tags
-- Probe of the release: pull requests that change the *Release* workflow, the
-  Dockerfile or the pinned versions build the image for amd64 and arm64
-  without publishing it and start both – arm64 emulated with QEMU. So far
-  the arm64 image was never started, and a broken build only surfaced at
-  the next tag. Started by hand, *Release* is now a probe as well; before, it
-  published the current state of main as `latest`
+### Fixed
+
+- A result card vanished again when the report arrived after it: whoever
+  started the impulse scan, null test, residual, speed stability or frequency
+  response measurement while the report was still being computed lost that
+  result. The report now only replaces its own placeholder, and a report for
+  an image that has since been replaced is dropped
+- Sentences on the release page broke in the middle, because GitHub shows
+  every line break of the changelog there
 
 ### Changed
 
@@ -41,15 +43,17 @@ that no stale verdicts are served after an update.
   `login-action` 4, `metadata-action` 6, `build-push-action` 7. Dependabot
   now bundles action updates into one pull request
 
-### Fixed
+### Added
 
-- Sentences on the release page broke in the middle, because GitHub shows
-  every line break of the changelog there
-- A result card vanished again when the report arrived after it: whoever
-  started the impulse scan, null test, residual, speed stability or frequency
-  response measurement while the report was still being computed lost that
-  result. The report now only replaces its own placeholder, and a report for
-  an image that has since been replaced is dropped
+- Every tag also creates its GitHub release page, taken from the matching
+  section of both changelogs (English on top, German below). The
+  *Release-Seite* workflow creates it by hand for older tags
+- Probe of the release: pull requests that change the *Release* workflow, the
+  Dockerfile or the pinned versions build the image for amd64 and arm64
+  without publishing it and start both – arm64 emulated with QEMU. So far
+  the arm64 image was never started, and a broken build only surfaced at
+  the next tag. Started by hand, *Release* is now a probe as well; before, it
+  published the current state of main as `latest`
 
 ## [1.1.0] – 2026-09-26
 
