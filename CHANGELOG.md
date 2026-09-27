@@ -17,6 +17,12 @@ that no stale verdicts are served after an update.
 - Every tag also creates its GitHub release page, taken from the matching
   section of both changelogs (English on top, German below). The
   *Release-Seite* workflow creates it by hand for older tags
+- Probe of the release: pull requests that change the *Release* workflow, the
+  Dockerfile or the pinned versions build the image for amd64 and arm64
+  without publishing it and start both – arm64 emulated with QEMU. So far
+  the arm64 image was never started, and a broken build only surfaced at
+  the next tag. Started by hand, *Release* is now a probe as well; before, it
+  published the current state of main as `latest`
 
 ### Changed
 
@@ -30,10 +36,10 @@ that no stale verdicts are served after an update.
   longer changes CI on its own
 - numpy 2.5.3 and contourpy 1.4.0; every measurement gives the same result as
   before
-- GitHub Actions on their Node 24 versions: `setup-python` 7,
-  `setup-buildx-action` 4, `login-action` 4, `metadata-action` 6,
-  `build-push-action` 7. Dependabot now bundles action updates into one pull
-  request
+- GitHub Actions on their Node 24 versions: `checkout` 7, `setup-python` 7,
+  `upload-artifact` 7, `setup-qemu-action` 4, `setup-buildx-action` 4,
+  `login-action` 4, `metadata-action` 6, `build-push-action` 7. Dependabot
+  now bundles action updates into one pull request
 
 ### Fixed
 

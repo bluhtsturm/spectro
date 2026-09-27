@@ -17,6 +17,13 @@ ungültig, damit nach einem Update keine alten Bewertungen ausgeliefert werden.
 - Jeder Tag legt auch seine Release-Seite auf GitHub an, aus dem passenden
   Abschnitt beider Changelogs (Englisch oben, Deutsch darunter). Für ältere
   Tags legt der Workflow *Release-Seite* sie von Hand an
+- Probe der Veröffentlichung: Pull Requests, die den Workflow *Release*, das
+  Dockerfile oder die festgelegten Fassungen ändern, bauen das Image für amd64
+  und arm64 ohne es zu veröffentlichen und starten beide – arm64 emuliert mit
+  QEMU. Bisher wurde das arm64-Image nie gestartet, und ein kaputter Bau fiel
+  erst beim nächsten Tag auf. Von Hand gestartet ist *Release* jetzt ebenfalls
+  eine Probe; vorher veröffentlichte es den aktuellen Stand von main als
+  `latest`
 
 ### Geändert
 
@@ -31,10 +38,10 @@ ungültig, damit nach einem Update keine alten Bewertungen ausgeliefert werden.
   oder ruff verändert die CI nicht mehr von selbst
 - numpy 2.5.3 und contourpy 1.4.0; alle Messungen liefern dieselben Ergebnisse
   wie vorher
-- GitHub Actions in ihren Node-24-Fassungen: `setup-python` 7,
-  `setup-buildx-action` 4, `login-action` 4, `metadata-action` 6,
-  `build-push-action` 7. Dependabot fasst Actions-Aktualisierungen jetzt in
-  einem Pull Request zusammen
+- GitHub Actions in ihren Node-24-Fassungen: `checkout` 7, `setup-python` 7,
+  `upload-artifact` 7, `setup-qemu-action` 4, `setup-buildx-action` 4,
+  `login-action` 4, `metadata-action` 6, `build-push-action` 7. Dependabot
+  fasst Actions-Aktualisierungen jetzt in einem Pull Request zusammen
 
 ### Behoben
 

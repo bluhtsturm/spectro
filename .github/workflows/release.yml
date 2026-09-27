@@ -1,8 +1,20 @@
 name: Release
 
+# Ein Tag v* baut das Image für amd64 und arm64, prüft beide, veröffentlicht es
+# und legt danach die Release-Seite an. Ändert ein Pull Request diesen
+# Workflow, das Dockerfile oder die festen Fassungen, läuft derselbe Bau samt
+# Prüfung als Probe ohne Veröffentlichung – ein Fehler, etwa nach einer
+# Dependabot-Aktualisierung der Actions oder des Basis-Images, fällt so vor dem
+# nächsten Tag auf. Von Hand gestartet ist es ebenfalls eine Probe.
 on:
   push:
     tags: ["v*"]
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - Dockerfile
+      - .dockerignore
+      - requirements.txt
   workflow_dispatch:
 
 permissions:
@@ -12,6 +24,8 @@ permissions:
 jobs:
   image:
     runs-on: ubuntu-latest
+    env:
+      VEROEFFENTLICHEN: ${{ startsWith(github.ref, 'refs/tags/v') }}
     steps:
       - uses: actions/checkout@v7
 
@@ -21,6 +35,7 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: An der GitHub-Registry anmelden
+        if: env.VEROEFFENTLICHEN == 'true'
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
@@ -37,29 +52,62 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Bauen und veröffentlichen
+      - name: Bauen, bei einem Tag auch veröffentlichen
         uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          push: true
+          push: ${{ env.VEROEFFENTLICHEN == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Startet und antwortet
+      # Beide Plattformen einzeln in den lokalen Docker laden; die Schichten
+      # kommen aus dem Bau eben, es wird nichts neu gebaut.
+      - name: amd64 zum Prüfen laden
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: spectro:amd64
+      - name: arm64 zum Prüfen laden
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/arm64
+          load: true
+          tags: spectro:arm64
+
+      - name: Startet und antwortet, auf beiden Plattformen
         run: |
-          docker run -d --name pruefung -p 8080:8080 \
-            ghcr.io/${{ github.repository }}:${{ steps.meta.outputs.version }}
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:8080/healthz > /dev/null; then
-              echo "erreichbar"; exit 0
+          for arch in amd64 arm64; do
+            echo "::group::$arch"
+            maschine=$(docker run --rm --platform "linux/$arch" "spectro:$arch" \
+              python -c "import platform; print(platform.machine())")
+            case "$arch:$maschine" in
+              amd64:x86_64|arm64:aarch64) echo "läuft als $maschine" ;;
+              *) echo "falsche Plattform: $maschine"; exit 1 ;;
+            esac
+            docker run -d --name "pruefung-$arch" --platform "linux/$arch" \
+              -p 8080:8080 "spectro:$arch"
+            ok=
+            # arm64 läuft emuliert und braucht zum Start deutlich länger
+            for i in $(seq 1 90); do
+              if curl -sf http://localhost:8080/healthz > /dev/null; then
+                ok=1; break
+              fi
+              sleep 2
+            done
+            if [ -z "$ok" ]; then
+              docker logs "pruefung-$arch"
+              exit 1
             fi
-            sleep 2
+            echo "$arch erreichbar"
+            docker rm -f "pruefung-$arch" > /dev/null
+            echo "::endgroup::"
           done
-          docker logs pruefung
-          exit 1
 
   seite:
     needs: image
