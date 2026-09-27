@@ -296,8 +296,8 @@ of 96 kHz stereo about 630 MB) and computes the rest block by block.
 ## Contributing
 
 ```bash
-pip install -r requirements-dev.txt
-pytest                 # 300 tests, about 110 seconds
+pip install -r requirements.txt -r requirements-dev.txt
+pytest                 # 311 tests, about 110 seconds
 pytest --ignore=tests/test_browser.py   # without a browser, about 80 seconds
 ruff check app spectro.py tests
 ```
@@ -343,9 +343,19 @@ older tag the page can be created by hand with the *Release-Seite* workflow.
 changes, which invalidates cache and result index so that no stale verdicts
 survive an update.
 
-Image and CI install the versions pinned in `requirements-lock.txt`;
-`requirements.txt` only states the lower bounds. Dependabot proposes updates
-to the pins, the actions and the base image as pull requests.
+Image and CI install pinned versions. `requirements.in` and
+`requirements-dev.in` state the lower bounds; `requirements.txt` and
+`requirements-dev.txt` are generated from them with pip-compile under
+Python 3.12, the version of the image:
+
+```bash
+pip-compile --strip-extras --output-file=requirements.txt requirements.in
+pip-compile --strip-extras --output-file=requirements-dev.txt requirements-dev.in
+```
+
+Dependabot proposes updates to the pins, the actions and the base image as pull
+requests; for the pins it re-runs pip-compile, so packages that depend on each
+other are updated together.
 
 ## License
 

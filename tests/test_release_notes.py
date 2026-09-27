@@ -31,6 +31,18 @@ class TestReleaseText:
         # nur der eigene Abschnitt, nicht die Versionen darunter
         assert "## [" not in text
 
+    def test_saetze_brechen_nicht_mitten_im_satz_um(self):
+        """GitHub zeigt auf einer Release-Seite jeden Zeilenumbruch an."""
+        text = release_notes.notes("v1.1.0")
+        zeilen = text.split("\n")
+        assert ("- `--cutoff` on the command line judged at the FFT size of the image "
+                "(default 2048) instead of the reference resolution 4096 and could "
+                "therefore differ from the interface and from `--json`") in zeilen
+        assert not [z for z in zeilen if z.startswith("  ") and z.strip()]
+        # Listenpunkte und Überschriften bleiben eigene Zeilen
+        assert "### Fixed" in zeilen and "### Behoben" in zeilen
+        assert sum(z.startswith("- ") for z in zeilen) >= 60
+
     def test_abschnitt_endet_vor_der_naechsten_version(self):
         text = release_notes.notes("v1.0.1")
         assert "Analysis version unchanged (12)." in text

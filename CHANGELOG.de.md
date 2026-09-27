@@ -18,6 +18,29 @@ ungültig, damit nach einem Update keine alten Bewertungen ausgeliefert werden.
   Abschnitt beider Changelogs (Englisch oben, Deutsch darunter). Für ältere
   Tags legt der Workflow *Release-Seite* sie von Hand an
 
+### Geändert
+
+- Die festgelegten Fassungen entstehen jetzt mit pip-compile: `requirements.in`
+  und `requirements-dev.in` nennen die Untergrenzen, `requirements.txt` und
+  `requirements-dev.txt` die aufgelösten Fassungen und ersetzen
+  `requirements-lock.txt`. Dependabot löst bei jeder Aktualisierung alles neu
+  auf, voneinander abhängige Pakete bleiben so zueinander passend – seine
+  erste Aktualisierung hatte `pydantic-core` ohne `pydantic` angehoben und ließ
+  sich nicht installieren
+- Auch Test- und Lint-Werkzeuge sind festgelegt; eine neue Fassung von pytest
+  oder ruff verändert die CI nicht mehr von selbst
+- numpy 2.5.3 und contourpy 1.4.0; alle Messungen liefern dieselben Ergebnisse
+  wie vorher
+- GitHub Actions in ihren Node-24-Fassungen: `setup-python` 7,
+  `setup-buildx-action` 4, `login-action` 4, `metadata-action` 6,
+  `build-push-action` 7. Dependabot fasst Actions-Aktualisierungen jetzt in
+  einem Pull Request zusammen
+
+### Behoben
+
+- Auf der Release-Seite brachen Sätze mitten in der Zeile um, weil GitHub dort
+  jeden Zeilenumbruch des Changelogs anzeigt
+
 ## [1.1.0] – 26.09.2026
 
 Analyseversion unverändert (12): Scan-Ergebnisse und die Bewertung einzelner

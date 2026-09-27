@@ -14,6 +14,9 @@ CALIBRATION.md
 ruff.toml
 pytest.ini
 requirements-dev.txt
+requirements-dev.in
+requirements.in
+.python-version
 CALIBRATION.de.md
 CHANGELOG.md
 CHANGELOG.de.md

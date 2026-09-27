@@ -1,0 +1,7 @@
+# Werkzeuge fuer Tests und Lint, abgestimmt auf die Laufzeit-Fassungen:
+#   pip-compile --strip-extras --output-file=requirements-dev.txt requirements-dev.in
+-c requirements.txt
+pytest>=8.0
+httpx>=0.27
+ruff>=0.4
+pytest-playwright>=0.5

@@ -10,14 +10,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
       - name: ffmpeg installieren
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: Abhängigkeiten
-        run: pip install -r requirements-dev.txt -c requirements-lock.txt
+        run: pip install -r requirements.txt -r requirements-dev.txt
       - name: Linter
         run: ruff check app spectro.py tests
       - name: Tests (ohne Browser)
@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -35,7 +35,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: Abhängigkeiten
         run: |
-          pip install -r requirements-dev.txt -c requirements-lock.txt
+          pip install -r requirements.txt -r requirements-dev.txt
           python -m playwright install --with-deps chromium
       - name: Oberflächentests
         run: pytest tests/test_browser.py -v
