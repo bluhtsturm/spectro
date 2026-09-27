@@ -10,6 +10,14 @@ The analysis version (`ANALYSIS_VERSION` in `app/core.py`) goes up whenever a
 measurement or a verdict changes. That invalidates cache and result index, so
 that no stale verdicts are served after an update.
 
+## [Unreleased]
+
+### Added
+
+- Every tag also creates its GitHub release page, taken from the matching
+  section of both changelogs (English on top, German below). The
+  *Release-Seite* workflow creates it by hand for older tags
+
 ## [1.1.0] – 2026-09-26
 
 Analysis version unchanged (12): scan results and the verdicts on individual

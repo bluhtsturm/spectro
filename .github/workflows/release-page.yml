@@ -1,0 +1,43 @@
+name: Release-Seite
+
+# Legt die Release-Seite eines Tags aus beiden CHANGELOGs an oder
+# aktualisiert sie. Der Release-Workflow ruft das nach jedem veroeffentlichten
+# Image auf; fuer aeltere Tags laesst es sich von Hand starten.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag, zum Beispiel v1.1.0"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  seite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Text aus den CHANGELOGs
+        env:
+          TAG: ${{ inputs.tag }}
+        run: python3 .github/scripts/release_notes.py "$TAG" > notes.md
+
+      - name: Seite anlegen oder aktualisieren
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release edit "$TAG" --title "spectro ${TAG#v}" --notes-file notes.md
+          else
+            gh release create "$TAG" --verify-tag --title "spectro ${TAG#v}" \
+              --notes-file notes.md
+          fi
