@@ -10,6 +10,14 @@ Die Analyseversion (`ANALYSIS_VERSION` in `app/core.py`) wird erhöht, sobald
 sich Messung oder Bewertung ändern. Cache und Ergebnisablage werden dadurch
 ungültig, damit nach einem Update keine alten Bewertungen ausgeliefert werden.
 
+## [Unreleased]
+
+### Neu
+
+- Jeder Tag legt auch seine Release-Seite auf GitHub an, aus dem passenden
+  Abschnitt beider Changelogs (Englisch oben, Deutsch darunter). Für ältere
+  Tags legt der Workflow *Release-Seite* sie von Hand an
+
 ## [1.1.0] – 26.09.2026
 
 Analyseversion unverändert (12): Scan-Ergebnisse und die Bewertung einzelner

@@ -343,8 +343,11 @@ findet, ist ein Vorschlag zum Nachhören, keine Diagnose.
 
 ## Veröffentlichungen
 
-Ein Tag `v1.2.3` baut ein Image für amd64 und arm64 und veröffentlicht es auf
-`ghcr.io`. [CHANGELOG.de.md](CHANGELOG.de.md) hält fest, was sich geändert hat;
+Ein Tag `v1.2.3` baut ein Image für amd64 und arm64, veröffentlicht es auf
+`ghcr.io` und legt danach die Release-Seite auf GitHub an – aus dem passenden
+Abschnitt beider Changelogs, Englisch oben, Deutsch darunter. Für einen älteren
+Tag lässt sie sich über den Workflow *Release-Seite* von Hand anlegen.
+[CHANGELOG.de.md](CHANGELOG.de.md) hält fest, was sich geändert hat;
 `ANALYSIS_VERSION` in `app/core.py` steigt, sobald sich Messung oder Bewertung
 ändern – Cache und Ergebnisablage werden dadurch ungültig, damit kein alter
 Befund ein Update überlebt.
