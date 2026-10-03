@@ -18,7 +18,7 @@ contourpy==1.4.0
     # via matplotlib
 cycler==0.12.1
     # via matplotlib
-fastapi==0.141.1
+fastapi==0.142.2
     # via -r requirements.in
 fonttools==4.66.0
     # via matplotlib
@@ -37,6 +37,8 @@ numpy==2.5.3
     #   -r requirements.in
     #   contourpy
     #   matplotlib
+opentelemetry-api==1.45.0
+    # via fastapi
 packaging==26.3
     # via matplotlib
 pillow==12.3.0
@@ -63,6 +65,7 @@ typing-extensions==4.16.0
     # via
     #   anyio
     #   fastapi
+    #   opentelemetry-api
     #   pydantic
     #   pydantic-core
     #   starlette
