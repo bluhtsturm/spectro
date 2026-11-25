@@ -10,7 +10,7 @@ The analysis version (`ANALYSIS_VERSION` in `app/core.py`) goes up whenever a
 measurement or a verdict changes. That invalidates cache and result index, so
 that no stale verdicts are served after an update.
 
-## [Unreleased]
+## [1.1.2] – 2026-11-25
 
 Analysis version (12) unchanged, the scan result index stays valid.
 `RENDER_VERSION` goes up to 3: comparison images with a wrong time axis and

@@ -10,7 +10,7 @@ Die Analyseversion (`ANALYSIS_VERSION` in `app/core.py`) wird erhöht, sobald
 sich Messung oder Bewertung ändern. Cache und Ergebnisablage werden dadurch
 ungültig, damit nach einem Update keine alten Bewertungen ausgeliefert werden.
 
-## [Unveröffentlicht]
+## [1.1.2] – 25.11.2026
 
 Analyseversion (12) unverändert, die Ergebnisablage der Scans bleibt gültig.
 `RENDER_VERSION` steigt auf 3: Vergleichsbilder mit falscher Zeitachse und
