@@ -532,6 +532,14 @@ weshalb 0,55 Hz als 0,49 Hz erscheint.
 Spektralspitze an der Gesamtenergie: reines Rauschen 0,003, Musik 0,05, ein
 Messton 0,48 bis 1,00. Die Schwelle liegt bei 0,20.
 
+Gezählt wird die Energie in ±1 % um die Spitze, nicht in festen ±3 Bins. Die
+Schwankung moduliert den Messton selbst: bei 3150 Hz und 0,1 % Wow verteilt
+sich seine Energie über rund ±5 Hz, bei 30 s Analysedauer also über mehr als
+hundert Bins. Mit ±3 Bins kam ein solcher Ton (12 s Prüfsignal) auf 0,11
+und wurde abgewiesen, mit ±1 % auf 1,00. Bei 315, 1000 und 3150 Hz wird dieselbe
+Schwankung jetzt gleich genau getroffen (0,10 % als 0,098 %); Rauschen und
+eine Akkordfolge mit Vibrato bleiben bei 0,003 bis 0,01.
+
 **An einer echten Messschallplatte** (315 Hz nach DIN, über einen
 Plattenspieler aufgenommen): Trägerfrequenz 312,0 Hz, also 0,95 % zu langsam;
 Wow 0,148 %, Flutter 0,076 %. Die stärkste Schwankung lag bei 0,49 Hz und

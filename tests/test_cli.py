@@ -103,6 +103,41 @@ class TestScan:
         capsys.readouterr()
 
 
+class TestBildnamen:
+    def test_gleichnamige_dateien_ueberschreiben_sich_nicht(self):
+        """CD1/01.flac, CD2/01.flac, CD3/01.flac: vorher landete das dritte
+        Bild auf dem Namen des zweiten."""
+        geschrieben: set = set()
+        for ordner in ("CD1", "CD2", "CD3", "CD4"):
+            name = spectro.unique_out("out", f"{ordner}/01.flac", geschrieben)
+            assert name not in geschrieben
+            geschrieben.add(name)
+        assert len(geschrieben) == 4
+
+
+class TestUploads:
+    def test_meldung_zaehlt_nur_geloeschte(self, tmp_path, capsys, monkeypatch):
+        """Schlug eine Loeschung fehl, stand sie trotzdem in der Erfolgszahl."""
+        from pathlib import Path
+        for name in ("a.flac", "b.flac"):
+            (tmp_path / name).write_bytes(b"x" * 10)
+        original = Path.unlink
+
+        def unlink(self, *args, **kwargs):
+            if self.name == "b.flac":
+                raise PermissionError("gesperrt")
+            return original(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "unlink", unlink)
+        rc = starten(monkeypatch, "--upload-dir", tmp_path, "--delete-all",
+                     "--yes", "--lang", "en")
+        out = capsys.readouterr()
+        assert rc == 1
+        assert "1 upload(s) deleted" in out.out
+        assert "gesperrt" in out.err
+        assert not (tmp_path / "a.flac").exists() and (tmp_path / "b.flac").exists()
+
+
 class TestAufraeumen:
     def test_prune_entfernt_geloeschte_und_alte_eintraege(self, tmp_path, sammlung,
                                                            fullband, capsys, monkeypatch):

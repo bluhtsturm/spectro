@@ -26,6 +26,32 @@ class TestVergleich:
         _, stats = core.compare(str(fullband), str(delayed), core.Params())
         assert abs(stats["offset_s"] + 0.25) < 0.05, stats["offset_s"]
 
+    def test_zeitachse_nach_dem_ausrichten(self, fullband, delayed):
+        """Die vorn beschnittene Fassung beginnt um den Versatz spaeter.
+
+        Vorher behielt sie ihre alte Startzeit, der Rest wurde ueber die volle
+        Dauer gestreckt - Achse, Zoom und A/B-Hoeren lagen daneben.
+        """
+        panels, stats = core.compare(str(fullband), str(delayed), core.Params())
+        a, b, diff = panels
+        assert stats["offset_s"] < 0                 # B beginnt spaeter
+        assert a.t0 == 0.0
+        assert b.t0 == pytest.approx(-stats["offset_s"], abs=1e-4)   # gerundet
+        spalte_a = (a.t1 - a.t0) / a.db.shape[1]
+        spalte_b = (b.t1 - b.t0) / b.db.shape[1]
+        assert abs(spalte_a - spalte_b) / spalte_a < 5e-3
+        assert diff.t0 == a.t0
+
+    def test_differenz_folgt_dem_zoom(self, fullband):
+        """Im Ausschnitt begann das Differenzbild bei 0 s statt beim Start."""
+        p = core.Params(start=2.0, duration=4.0)
+        panels, _ = core.compare(str(fullband), str(fullband), p)
+        a, _, diff = panels
+        assert a.t0 == pytest.approx(2.0)
+        assert diff.kind == "diff"
+        assert diff.t0 == pytest.approx(2.0)
+        assert diff.t1 == pytest.approx(a.t1, abs=0.05)
+
     def test_identische_dateien_ergeben_null_differenz(self, fullband):
         _, stats = core.compare(str(fullband), str(fullband), core.Params())
         assert stats["diff"]["p90_abs_db"] == 0.0
@@ -245,6 +271,17 @@ class TestRobustheit:
         out = tmp_path / "raw.png"
         core.render(core.build_panels(a, p), p, str(out))
         assert out.stat().st_size > 1000
+
+    @pytest.mark.parametrize("kw", [
+        {"fmin": 30000},                              # ueber Nyquist (22,05 kHz)
+        {"scale": "log", "fmax": 15},                 # unter dem Beginn der log-Achse
+    ])
+    def test_leerer_frequenzbereich_wird_abgewiesen(self, tmp_path, fullband, kw):
+        """Statt eines Bildes mit rueckwaerts laufender Achse eine Meldung."""
+        p = core.Params(**kw)
+        a = core.analyse(str(fullband), p)
+        with pytest.raises(core.AudioError, match="Frequenzbereich"):
+            core.render(core.build_panels(a, p), p, str(tmp_path / "x.png"))
 
     def test_zeitfenster_ausserhalb_der_datei(self, fullband):
         with pytest.raises(core.AudioError):

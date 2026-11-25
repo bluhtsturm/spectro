@@ -10,6 +10,44 @@ The analysis version (`ANALYSIS_VERSION` in `app/core.py`) goes up whenever a
 measurement or a verdict changes. That invalidates cache and result index, so
 that no stale verdicts are served after an update.
 
+## [Unreleased]
+
+Analysis version (12) unchanged, the scan result index stays valid.
+`RENDER_VERSION` goes up to 3: comparison images with a wrong time axis and
+cached measurement results are recomputed once.
+
+### Fixed
+
+- Speed stability: the standard 3150 Hz test tone (and 1 kHz with stronger
+  fluctuation) was rejected with “no sufficiently steady tone found” as soon
+  as it carried some wow. The tone share was measured within a fixed ±3 bins,
+  but the fluctuation spreads the tone's energy over several Hz. The window
+  now grows with frequency (±1 %); at 315 Hz every reading stays the same,
+  noise and music are still rejected
+- A/B comparison: after offset compensation the version trimmed at the start
+  kept its old start time and its image was stretched over the full duration.
+  Time axis, drag-to-zoom and A/B listening were off by up to the offset
+- A/B comparison: when zoomed, the difference image started at 0 s instead of
+  at the selected section
+- A frequency range with nothing in it (fmin above the Nyquist frequency, fmax
+  below the start of the log axis) produced an image with a reversed
+  frequency axis; there is now a clear message instead
+- `nfft` had no upper bound: a single request with `nfft=2**30` allocated
+  gigabyte-sized windows. Allowed values are now 32 to 65536
+- Command line: with three files of the same name (`CD1/01.flac`,
+  `CD2/01.flac`, `CD3/01.flac`) the third image overwrote the second
+- Command line: `--delete`/`--delete-all` counted failed deletions as deleted
+  and still exited with 0
+- A damaged result index entry (valid JSON, but not an object) aborted the
+  whole scan
+- The image cache answered with error 500 when cleanup removed an image right
+  between the check and the access
+- Frequency response from a tone sequence: unlike the other measurements, its
+  length was not capped at 900 s
+- Speed stability: the carrier search was one bin off whenever a bin fell
+  exactly on 25 Hz (the normal case for 30 s at 48 kHz)
+- Stereo statistics: an abort while reading left an ffmpeg process running
+
 ## [1.1.1] – 2026-09-27
 
 Analysis version (12) and `RENDER_VERSION` (2) unchanged: scan results,

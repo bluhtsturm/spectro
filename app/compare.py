@@ -166,21 +166,26 @@ def compare(path_a: str, path_b: str, p: Params, align: bool = True,
     if col_b < hop_eff * 0.999:
         mb = resample_cols(mb, max(1, int(round(b.duration / hop_eff))))
 
-    offset = 0.0
+    shift = 0
     da = to_db(ma, float(ma.max()) or 1.0)
     db_ = to_db(mb, float(mb.max()) or 1.0)
     if align:
         shift = align_shift(da, db_)
-        offset = shift * hop_eff
         if shift > 0:
             da = da[:, shift:]
         elif shift < 0:
             db_ = db_[:, -shift:]
+    offset = shift * hop_eff
 
+    # Wer vorn beschnitten wurde, beginnt entsprechend spaeter. Mit der alten
+    # Startzeit wurde der Rest ueber die volle Dauer gestreckt: Achse,
+    # Zoom und Wiedergabe lagen dann um bis zu den Versatz daneben.
+    t0_a = a.t0 + (offset if shift > 0 else 0.0)
+    t0_b = b.t0 + (-offset if shift < 0 else 0.0)
     chan = a.labels[0] if a.labels else t("ch.mono_sum", p.lang)
     panels = [
-        Panel(da, f"A: {ia['name']} · {chan}", sr, a.t0, a.t0 + a.duration),
-        Panel(db_, f"B: {ib['name']} · {chan}", sr, b.t0, b.t0 + b.duration),
+        Panel(da, f"A: {ia['name']} · {chan}", sr, t0_a, a.t0 + a.duration),
+        Panel(db_, f"B: {ib['name']} · {chan}", sr, t0_b, b.t0 + b.duration),
     ]
 
     stats = {
@@ -222,8 +227,10 @@ def compare(path_a: str, path_b: str, p: Params, align: bool = True,
         "max_abs_db": round(float(np.abs(dband).max()), 2),
     }
     if show_diff:
+        # Die Differenz laeuft auf der Zeitachse von A - auch im Zoom, wo
+        # sie vorher bei 0 s statt beim gewaehlten Ausschnitt begann
         panels.append(Panel(
-            d, t("plot.difference", p.lang), sr, 0.0, n * hop_eff, kind="diff",
+            d, t("plot.difference", p.lang), sr, t0_a, t0_a + n * hop_eff, kind="diff",
             note=t("plot.diff_note", p.lang, band=_khz(cut, p.lang),
                    median=median, p90=p90),
         ))

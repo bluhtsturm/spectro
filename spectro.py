@@ -127,9 +127,23 @@ def params_from(args) -> Params:
 
 
 def unique_out(outdir: str, path: str, written: set) -> str:
+    """Bildname, der in diesem Lauf noch nicht vergeben ist.
+
+    Vorher gab es nur einen Ausweichnamen: die dritte gleichnamige Datei
+    (etwa CD1/01.flac, CD2/01.flac, CD3/01.flac) ueberschrieb das Bild der
+    zweiten.
+    """
     base = os.path.basename(path)
-    cand = os.path.join(outdir, os.path.splitext(base)[0] + ".png")
-    return cand if cand not in written else os.path.join(outdir, base + ".png")
+    stamm = os.path.splitext(base)[0]
+    cand = os.path.join(outdir, stamm + ".png")
+    if cand not in written:
+        return cand
+    cand = os.path.join(outdir, base + ".png")
+    i = 2
+    while cand in written:
+        cand = os.path.join(outdir, f"{stamm}_{i}.png")
+        i += 1
+    return cand
 
 
 def open_index(args) -> SidecarStore:
@@ -298,15 +312,20 @@ def manage_uploads(args) -> int:
                             + " " + t("cli.yes_no", args.lang) + " ")
             if antwort.strip().lower() not in ("j", "y", "ja", "yes"):
                 return 0
-        bytes_ = 0
+        bytes_ = geloescht = 0
         for f in ziele:
             try:
-                bytes_ += f.stat().st_size
+                groesse = f.stat().st_size
                 f.unlink()
             except OSError as e:
                 print(t("cli.error_at", args.lang, path=f.name, msg=e), file=sys.stderr)
-        print(t("cli.up_deleted", args.lang, n=len(ziele), mb=bytes_ / 1e6))
-        return 0
+                continue
+            # nur zaehlen, was wirklich weg ist - vorher standen auch
+            # fehlgeschlagene Loeschungen in der Erfolgsmeldung
+            bytes_ += groesse
+            geloescht += 1
+        print(t("cli.up_deleted", args.lang, n=geloescht, mb=bytes_ / 1e6))
+        return 0 if geloescht == len(ziele) else 1
 
     if not dateien:
         print(t("cli.up_none", args.lang))

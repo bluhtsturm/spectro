@@ -201,6 +201,7 @@ class TestSteilheit:
 class TestParameter:
     @pytest.mark.parametrize("kw,erwartet", [
         ({"nfft": 3}, "Zweierpotenz"),
+        ({"nfft": 1 << 30}, "Zweierpotenz"),          # sonst Gigabyte-Fenster
         ({"overlap": 1.5}, "overlap"),
         ({"window": "gibtsnicht"}, "Fenster"),
         ({"scale": "polar"}, "Skala"),

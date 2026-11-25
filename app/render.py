@@ -12,7 +12,7 @@ from matplotlib.figure import Figure
 from matplotlib.ticker import FuncFormatter
 
 from .i18n import t
-from .params import THEMES, Params
+from .params import THEMES, AudioError, Params
 
 
 def _mel(f):
@@ -50,7 +50,7 @@ def pick_ticks(scale: str, lo: float, hi: float) -> list:
 # Aendert sich, wenn dieselben Daten anders gezeichnet werden. Gehoert in den
 # Cache-Schluessel der Bilder, nicht in die Analyseversion: die macht auch
 # die Ergebnisablage ungueltig, und dafuer gibt es hier keinen Grund.
-RENDER_VERSION = 2
+RENDER_VERSION = 3
 
 
 def remap(db: np.ndarray, sr: int, nfft: int, freqs: np.ndarray) -> np.ndarray:
@@ -112,6 +112,12 @@ def render(panels: list, p: Params, out, title: str = "", subtitle: str = "") ->
     th = THEMES.get(p.theme, THEMES["dark"])
     sr = panels[0].sr
     fmax = min(p.fmax or sr / 2, sr / 2)
+    # Liegt fmin ueber der Nyquist-Frequenz (oder fmax unter dem Beginn der
+    # log-Achse), bliebe kein Bereich uebrig: die Achse liefe rueckwaerts und
+    # das Bild stuende auf dem Kopf. Dann lieber eine klare Meldung.
+    unten = max(p.fmin, 20.0) if p.scale == "log" else p.fmin
+    if fmax - unten < 1.0:
+        raise AudioError(t("param.freq_range", p.lang, lo=unten, hi=fmax))
     rows = 800 if p.raw else max(320, int(p.height * p.dpi))
     freqs = target_freqs(p.scale, p.fmin, fmax, rows)
 

@@ -192,24 +192,28 @@ def stereo_stats(path: str, p: Params) -> dict:
     proc = _decoder(path, sr, 2, p.start, p.duration)
     n, sxy, sxx, syy, sm, ss = 0, 0.0, 0.0, 0.0, 0.0, 0.0
     tail = b""
-    while True:
-        chunk = proc.stdout.read(CHUNK_BYTES)
-        if not chunk:
-            break
-        chunk = tail + chunk
-        usable = len(chunk) - (len(chunk) % 8)
-        tail = chunk[usable:]
-        b = np.frombuffer(chunk[:usable], dtype=np.float32).reshape(-1, 2).astype(np.float64)
-        l, r = b[:, 0], b[:, 1]
-        n += l.size
-        sxy += float((l * r).sum())
-        sxx += float((l * l).sum())
-        syy += float((r * r).sum())
-        sm += float((((l + r) / 2) ** 2).sum())
-        ss += float((((l - r) / 2) ** 2).sum())
-    proc.stdout.close()
-    proc.wait()
-    _decoder_error(proc)
+    # try/finally wie bei den anderen Lesern: bricht die Schleife ab, bliebe
+    # sonst ein ffmpeg-Prozess samt offener Fehlerdatei zurueck
+    try:
+        while True:
+            chunk = proc.stdout.read(CHUNK_BYTES)
+            if not chunk:
+                break
+            chunk = tail + chunk
+            usable = len(chunk) - (len(chunk) % 8)
+            tail = chunk[usable:]
+            b = np.frombuffer(chunk[:usable], dtype=np.float32).reshape(-1, 2).astype(np.float64)
+            l, r = b[:, 0], b[:, 1]
+            n += l.size
+            sxy += float((l * r).sum())
+            sxx += float((l * l).sum())
+            syy += float((r * r).sum())
+            sm += float((((l + r) / 2) ** 2).sum())
+            ss += float((((l - r) / 2) ** 2).sum())
+    finally:
+        proc.stdout.close()
+        proc.wait()
+        _decoder_error(proc)
     if not n:
         return {}
     corr = sxy / (np.sqrt(sxx * syy) + EPS)

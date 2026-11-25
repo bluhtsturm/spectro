@@ -518,6 +518,14 @@ gives exactly zero. The modulation spectrum resolves 0.24 Hz, which is why
 in total energy: pure noise 0.003, music 0.05, a test tone 0.48 to 1.00. The
 threshold sits at 0.20.
 
+The energy is counted within ±1 % around the peak, not within a fixed ±3 bins.
+The fluctuation modulates the test tone itself: at 3150 Hz and 0.1 % wow its
+energy spreads over roughly ±5 Hz, which at 30 s of analysis is more than a
+hundred bins. With ±3 bins such a tone (12 s test signal) reached 0.11 and
+was rejected; with ±1 % it reaches 1.00. At 315, 1000 and 3150 Hz the same
+fluctuation is now measured equally well (0.10 % as 0.098 %); noise and a
+chord sequence with vibrato stay at 0.003 to 0.01.
+
 **On a real test record** (315 Hz per DIN, captured through a turntable):
 carrier frequency 312.0 Hz, so 0.95 % slow; wow 0.148 %, flutter 0.076 %. The
 strongest fluctuation sat at 0.49 Hz, in step with one revolution at 33 rpm — a

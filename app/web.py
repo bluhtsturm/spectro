@@ -291,11 +291,18 @@ def write_atomic(path: Path, data: bytes) -> None:
 
 def cache_get(key: str):
     p = CACHE_DIR / f"{key}.png"
-    if not p.exists():
-        return None, "[]"
-    os.utime(p, None)
     meta = CACHE_DIR / f"{key}.json"
-    return p, (meta.read_text() if meta.exists() else "[]")
+    # Das Aufraeumen laeuft in einem anderen Thread und kann Bild oder
+    # Geometrie zwischen Pruefung und Zugriff entfernen - dann ist es ein
+    # Fehlschlag des Caches, kein Fehler 500
+    try:
+        os.utime(p, None)
+    except OSError:
+        return None, "[]"
+    try:
+        return p, meta.read_text()
+    except OSError:
+        return p, "[]"
 
 
 def stats_path(key: str) -> Path:

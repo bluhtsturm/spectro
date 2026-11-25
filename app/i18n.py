@@ -176,7 +176,7 @@ MESSAGES: dict[str, dict[str, str]] = {
         "err.too_short_mod": "zu wenig Material für die Modulationsanalyse",
         "err.no_samples_from": "keine Samples aus {name}: {err}",
         "param.not_finite": "{name} muss eine endliche Zahl sein",
-        "param.nfft": "nfft muss eine Zweierpotenz >= 32 sein",
+        "param.nfft": "nfft muss eine Zweierpotenz von 32 bis 65536 sein",
         "param.overlap": "overlap muss zwischen 0 und 0.95 liegen",
         "param.window": "unbekanntes Fenster: {value}",
         "param.scale": "unbekannte Skala: {value}",
@@ -185,6 +185,9 @@ MESSAGES: dict[str, dict[str, str]] = {
         "param.cmap": "unbekannte Colormap: {value}",
         "param.theme": "unbekanntes Theme: {value}",
         "param.freq_close": "fmin und fmax liegen zu dicht beieinander",
+        "param.freq_range": ("kein darstellbarer Frequenzbereich zwischen {lo:g} "
+                             "und {hi:g} Hz – fmin liegt über der Nyquist-Frequenz "
+                             "oder fmax unter dem Beginn der log-Achse (20 Hz)"),
         "param.sr": "sr muss zwischen 1000 und 768000 Hz liegen",
 
         # --- Kanalbezeichnungen -------------------------------------------
@@ -468,7 +471,7 @@ MESSAGES: dict[str, dict[str, str]] = {
         "err.too_short_mod": "not enough material for the modulation analysis",
         "err.no_samples_from": "no samples from {name}: {err}",
         "param.not_finite": "{name} must be a finite number",
-        "param.nfft": "nfft must be a power of two >= 32",
+        "param.nfft": "nfft must be a power of two from 32 to 65536",
         "param.overlap": "overlap must lie between 0 and 0.95",
         "param.window": "unknown window: {value}",
         "param.scale": "unknown scale: {value}",
@@ -477,6 +480,9 @@ MESSAGES: dict[str, dict[str, str]] = {
         "param.cmap": "unknown colormap: {value}",
         "param.theme": "unknown theme: {value}",
         "param.freq_close": "fmin and fmax are too close together",
+        "param.freq_range": ("no frequency range left to display between {lo:g} "
+                             "and {hi:g} Hz – fmin lies above the Nyquist frequency "
+                             "or fmax below the start of the log axis (20 Hz)"),
         "param.sr": "sr must lie between 1000 and 768000 Hz",
 
         "ch.mono_sum": "Mono sum", "ch.mono": "Mono",

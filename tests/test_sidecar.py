@@ -40,6 +40,13 @@ class TestAblage:
         finally:
             core.ANALYSIS_VERSION -= 1
 
+    def test_eintrag_ohne_objekt_gilt_als_fehlend(self, store, fullband):
+        """Gueltiges JSON, aber kein Objekt: vorher AttributeError, der den
+        ganzen Scan abbrach."""
+        store.save("musik", "d.flac", fullband, "q", {"x": 1})
+        store.path_for("musik", "d.flac").write_text("[1, 2]", encoding="utf-8")
+        assert store.load("musik", "d.flac", fullband, "q") is None
+
     def test_pfade_verschiedener_ordner_kollidieren_nicht(self, store, fullband):
         store.save("musik", "gleich.flac", fullband, "q", {"quelle": "musik"})
         store.save("rips", "gleich.flac", fullband, "q", {"quelle": "rips"})

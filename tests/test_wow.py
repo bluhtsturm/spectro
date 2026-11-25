@@ -42,6 +42,16 @@ class TestGenauigkeit:
         gemessen = r["wow_pct"] if mod < 6 else r["flutter_pct"]
         assert abs(gemessen - soll) < 0.02, (soll, r)
 
+    @pytest.mark.parametrize("traeger", [1000.0, 3150.0])
+    def test_hoher_messton_mit_wow(self, media, traeger):
+        """Der Normmesston liegt bei 3150 Hz. Seine Schwankung verteilt die
+        Energie ueber einige Hz - das feste Umfeld von +-3 Bins sah davon nur
+        ein Zehntel und meldete "kein Dauerton"."""
+        r = core.wow_flutter(str(moduliert(media, 0.10, 0.55, traeger=traeger,
+                                           name=f"wow_{traeger:.0f}_0.10.flac")))
+        assert r["nominal_hz"] == traeger
+        assert abs(r["wow_pct"] - 0.10) < 0.02, r
+
     def test_unmodulierter_ton_ergibt_null(self, media):
         r = core.wow_flutter(str(moduliert(media, 0.0, 0.0)))
         assert r["wow_pct"] < 0.01 and r["flutter_pct"] < 0.01

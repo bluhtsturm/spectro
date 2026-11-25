@@ -92,6 +92,10 @@ class SidecarStore:
             st = source.stat()
         except (OSError, ValueError):
             return None
+        # Ein beschaedigter Eintrag, der zwar JSON, aber kein Objekt ist,
+        # warf sonst AttributeError - und riss den ganzen Scan mit
+        if not isinstance(data, dict):
+            return None
         if data.get("kind") != kind:
             return None
         if data.get("analysis_version") != core.ANALYSIS_VERSION:

@@ -177,9 +177,20 @@ def wow_flutter(path: str, p: Params | None = None, nominal_hz: float | None = N
     w = np.hanning(x.size)
     F = np.abs(np.fft.rfft(x * w))
     f = np.fft.rfftfreq(x.size, 1 / sr)
+    # Erster Bin oberhalb von 25 Hz - "side=right", damit der Versatz genau zur
+    # Maske f > 25 passt. Faellt ein Bin exakt auf 25 Hz (bei 30 s in 48 kHz
+    # der Regelfall), lag die Fundstelle sonst einen Bin neben der Spitze.
     gueltig = f > 25
-    idx = int(np.argmax(F[gueltig])) + int(np.searchsorted(f, 25))
-    umfeld = slice(max(0, idx - 3), idx + 4)
+    idx = int(np.argmax(F[gueltig])) + int(np.searchsorted(f, 25, side="right"))
+    # Der Messton ist durch die Schwankung selbst frequenzmoduliert: bei
+    # 3150 Hz und 0,1 % Wow verteilt sich seine Energie ueber rund +-5 Hz,
+    # bei 30 s Analysedauer also ueber mehr als hundert Bins. Ein festes
+    # Umfeld von +-3 Bins sah davon nur einen Bruchteil und wies den
+    # Normmesston schon bei 0,05 % Wow als "kein Dauerton" ab. Das Umfeld
+    # waechst deshalb mit der Frequenz: +-1 % deckt Schwankungen bis rund
+    # 0,7 % Effektivwert.
+    halb = max(3, int(np.ceil(0.01 * f[idx] / (f[1] - f[0]))))
+    umfeld = slice(max(0, idx - halb), idx + halb + 1)
     traeger = float((f[umfeld] * F[umfeld] ** 2).sum() / ((F[umfeld] ** 2).sum() + EPS))
     tonanteil = float((F[umfeld] ** 2).sum() / ((F ** 2).sum() + EPS))
     if tonanteil < 0.2 or traeger < 40:
@@ -325,7 +336,9 @@ def tone_sweep(path: str, p: Params | None = None, reference_hz: float = 1000.0,
     sr = 48000
     info = probe(path)
     kanaele = max(1, min(int(info.get("channels") or 1), 2))
-    proc = _decoder(path, sr, kanaele, p.start, p.duration or max_seconds)
+    # wie bei den uebrigen Messungen gedeckelt: die Datei liegt ganz im Speicher
+    dauer = min(float(p.duration or max_seconds), max_seconds)
+    proc = _decoder(path, sr, kanaele, p.start, dauer)
     try:
         roh = proc.stdout.read()
     finally:

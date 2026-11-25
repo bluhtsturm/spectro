@@ -10,6 +10,45 @@ Die Analyseversion (`ANALYSIS_VERSION` in `app/core.py`) wird erhöht, sobald
 sich Messung oder Bewertung ändern. Cache und Ergebnisablage werden dadurch
 ungültig, damit nach einem Update keine alten Bewertungen ausgeliefert werden.
 
+## [Unveröffentlicht]
+
+Analyseversion (12) unverändert, die Ergebnisablage der Scans bleibt gültig.
+`RENDER_VERSION` steigt auf 3: Vergleichsbilder mit falscher Zeitachse und
+zwischengespeicherte Messergebnisse werden einmal neu gerechnet.
+
+### Behoben
+
+- Gleichlauf: der Normmesston 3150 Hz (und schon 1 kHz bei stärkerer
+  Schwankung) wurde mit „kein ausreichend stabiler Dauerton“ abgewiesen,
+  sobald er etwas Wow trug. Der Tonanteil wurde in festen ±3 Bins gemessen,
+  die Schwankung verteilt die Energie des Tons aber über einige Hz. Das Umfeld
+  wächst jetzt mit der Frequenz (±1 %); bei 315 Hz bleiben alle Messwerte
+  gleich, Rauschen und Musik werden weiterhin abgewiesen
+- Vergleich A/B: nach dem Versatzausgleich behielt die vorn beschnittene
+  Fassung ihre alte Startzeit, ihr Bild wurde über die volle Dauer gestreckt.
+  Zeitachse, Zoom per Aufziehen und das A/B-Hören lagen dadurch um bis zu den
+  Versatz daneben
+- Vergleich A/B: das Differenzbild begann im Zoom bei 0 s statt beim
+  gewählten Ausschnitt
+- Ein Frequenzbereich ohne Inhalt (fmin über der Nyquist-Frequenz, fmax unter
+  dem Beginn der log-Achse) ergab ein Bild mit rückwärts laufender
+  Frequenzachse; jetzt gibt es eine verständliche Meldung
+- `nfft` hatte keine Obergrenze: eine einzige Anfrage mit `nfft=2**30` legte
+  Gigabyte-große Fenster an. Erlaubt sind jetzt 32 bis 65536
+- Kommandozeile: bei drei gleichnamigen Dateien (`CD1/01.flac`,
+  `CD2/01.flac`, `CD3/01.flac`) überschrieb das dritte Bild das zweite
+- Kommandozeile: `--delete`/`--delete-all` zählten fehlgeschlagene Löschungen
+  als gelöscht und endeten trotzdem mit 0
+- Ein beschädigter Eintrag der Ergebnisablage (gültiges JSON, aber kein
+  Objekt) brach den ganzen Scan ab
+- Der Bild-Cache antwortete mit Fehler 500, wenn das Aufräumen ein Bild genau
+  zwischen Prüfung und Zugriff entfernte
+- Frequenzgang aus einer Tonfolge: die Länge war anders als bei den übrigen
+  Messungen nicht auf 900 s begrenzt
+- Gleichlauf: die Suche nach dem Trägerton lag einen Bin daneben, wenn ein
+  Bin genau auf 25 Hz fiel (bei 30 s in 48 kHz der Regelfall)
+- Stereowerte: ein Abbruch beim Lesen hinterließ einen laufenden ffmpeg-Prozess
+
 ## [1.1.1] – 27.09.2026
 
 Analyseversion (12) und `RENDER_VERSION` (2) unverändert: Scan-Ergebnisse,

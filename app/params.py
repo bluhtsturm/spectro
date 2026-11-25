@@ -28,6 +28,7 @@ def set_language(lang: str) -> str:
 
 CHUNK_BYTES = 1 << 20
 EPS = 1e-12
+MAX_NFFT = 65536
 
 WINDOWS = {
     "hann": np.hanning,
@@ -113,7 +114,9 @@ class Params:
             wert = getattr(self, name)
             if wert is not None and not math.isfinite(float(wert)):
                 raise ValueError(t("param.not_finite", sprache, name=name))
-        if self.nfft < 32 or self.nfft & (self.nfft - 1):
+        # Obergrenze wie bei dpi, Bildgroesse und Spaltenzahl: ohne sie legte
+        # eine einzige Anfrage (nfft=2**30) Gigabyte-grosse Fenster an
+        if not 32 <= self.nfft <= MAX_NFFT or self.nfft & (self.nfft - 1):
             raise ValueError(t("param.nfft", sprache))
         if not 0.0 <= self.overlap <= 0.95:
             raise ValueError(t("param.overlap", sprache))
