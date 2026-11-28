@@ -10,6 +10,7 @@ annotated-types==0.8.0
     # via pydantic
 anyio==4.15.1
     # via
+    #   fastapi
     #   starlette
     #   watchfiles
 click==8.5.0
@@ -18,7 +19,7 @@ contourpy==1.4.0
     # via matplotlib
 cycler==0.12.1
     # via matplotlib
-fastapi==0.141.1
+fastapi==0.165.0
     # via -r requirements.in
 fonttools==4.66.0
     # via matplotlib
@@ -32,11 +33,13 @@ kiwisolver==1.5.1
     # via matplotlib
 matplotlib==3.11.2
     # via -r requirements.in
-numpy==2.5.3
+numpy==2.5.5
     # via
     #   -r requirements.in
     #   contourpy
     #   matplotlib
+opentelemetry-api==1.45.2
+    # via fastapi
 packaging==26.3
     # via matplotlib
 pillow==12.3.0
@@ -51,7 +54,7 @@ python-dateutil==2.9.0.post0
     # via matplotlib
 python-dotenv==1.2.3
     # via uvicorn
-python-multipart==0.0.32
+python-multipart==0.0.34
     # via -r requirements.in
 pyyaml==6.0.3
     # via uvicorn
@@ -63,6 +66,7 @@ typing-extensions==4.16.0
     # via
     #   anyio
     #   fastapi
+    #   opentelemetry-api
     #   pydantic
     #   pydantic-core
     #   starlette
